@@ -59,7 +59,7 @@ export default function TransactionForm({ onCreated }: Props){
     }
 
     return (
-        <form onSubmit={handleSubmit} className="space-y-3 p-4 bg-white rounded-2x1 shadow">
+        <form onSubmit={handleSubmit} className="space-y-3 p-4 bg-white rounded-2xl shadow">
             <div className="grid grid-cols-2 gap-3">
                 <label className="flex flex-col">
                     <span className="text-sm">Fecha</span>
@@ -67,7 +67,7 @@ export default function TransactionForm({ onCreated }: Props){
                 </label>
                 <label className="flex flex-col">
                     <span className="text-sm">Monto</span>
-                    <input name="amount" type="amount" step="0.01" value={form.amount} onChange={handleChange} className="border rounded px-2 py-1" required />
+                    <input name="amount" type="number" step="0.01" value={form.amount} onChange={handleChange} className="border rounded px-2 py-1" required />
                 </label>
                 <label className="flex flex-col">
                     <span className="text-sm">Tipo</span>
