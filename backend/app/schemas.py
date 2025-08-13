@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, ConfigDict, conlist
 from typing import Optional, Literal, List
-from datetime import date
+import datetime as dt
 
 from sqlalchemy import Transaction
 
@@ -38,10 +38,10 @@ class CategoryOut(CategoryBase):
 
 # Transaction Schemas
 class TransactionBase(BaseModel):
-    date: date
+    date: dt.date
     amount: float = Field(gt=0, description="Must be greater than 0")
     currency: str
-    type: str = Literal["expense", "income"]
+    type: Literal["expense", "income"]
     description: Optional[str] = None
     detail_json: Optional[str] = None
     account_id: int
@@ -51,7 +51,7 @@ class TransactionCreate(TransactionBase):
     pass
 
 class TransactionUpdate(BaseModel):
-    date: Optional[date] = None
+    date: Optional[dt.date] = None
     amount: Optional[float] = None
     currency: Optional[str] = None
     type: Optional[Literal["expense", "income"]] = None
