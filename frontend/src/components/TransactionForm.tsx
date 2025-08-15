@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { api } from '../api'
 import type { Account, Category } from '../types'
+import { toProperCase } from '../utils/string'
 
 type Props = { onCreated: () => void }
 
@@ -101,7 +102,7 @@ export default function TransactionForm({ onCreated }: Props){
                         <option value={0}>Selecciona…</option>
                             {categories.map((c) => (
                                 <option key={c.id} value={c.id}>
-                                    {c.name} [{c.type}]
+                                    {toProperCase(c.name)}
                                 </option>
                             ))}
                     </select>

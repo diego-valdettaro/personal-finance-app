@@ -1,14 +1,20 @@
 from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./app.db"
+
+# Create the engine
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+
+# Create the session
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Base is the base class for all models
 Base = declarative_base()
 
-from typing import Generator
-
-def get_db() -> Generator:
+# Get the database session
+def get_db():
     db = SessionLocal()
     try:
         yield db

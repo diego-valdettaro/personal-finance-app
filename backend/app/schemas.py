@@ -1,13 +1,13 @@
 from pydantic import BaseModel, Field, ConfigDict, conlist
-from typing import Optional, Literal, List
+from typing import Optional, Literal, List  
 import datetime as dt
-
-from sqlalchemy import Transaction
+from .models import TransactionType, ShareSource
 
 # Account Schemas
 class AccountBase(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     currency: str = Field(min_length=3, max_length=3)
+    opening_balance: float = Field(ge=0)
 
 class AccountCreate(AccountBase):
     pass
@@ -15,6 +15,7 @@ class AccountCreate(AccountBase):
 class AccountUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     currency: Optional[str] = Field(default=None, min_length=3, max_length=3)
+    opening_balance: Optional[float] = Field(default=None, ge=0)
 
 class AccountOut(AccountBase):
     id: int
@@ -23,43 +24,91 @@ class AccountOut(AccountBase):
 # Category Schemas
 class CategoryBase(BaseModel):
     name: str = Field(min_length=1, max_length=100)
-    type: Literal["expense", "income"]
+    type: TransactionType
 
 class CategoryCreate(CategoryBase):
     pass
 
 class CategoryUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    type: Optional[Literal["expense", "income"]] = None
+    type: Optional[TransactionType] = None
 
 class CategoryOut(CategoryBase):
+    id: int
+    model_config = ConfigDict(from_attributes=True)
+
+# Person Schemas
+class PersonBase(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    is_me: bool = Field(default=False)
+
+class PersonCreate(PersonBase):
+    pass
+
+class PersonUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    is_me: Optional[bool] = None
+
+class PersonOut(PersonBase):
+    id: int
+    model_config = ConfigDict(from_attributes=True)
+
+# Transaction Share Schemas
+class TransactionShareBase(BaseModel):
+    person_id: int
+    amount_share: float = Field(ge=0.0, description="Must be greater than 0")
+    source: ShareSource = Field(default=ShareSource.auto_default)
+
+class TransactionShareCreate(TransactionShareBase):
+    pass
+
+class TransactionShareUpdate(BaseModel):
+    person_id: Optional[int] = None
+    amount_share: Optional[float] = None
+    source: Optional[ShareSource] = None
+
+class TransactionShareOut(TransactionShareBase):
     id: int
     model_config = ConfigDict(from_attributes=True)
 
 # Transaction Schemas
 class TransactionBase(BaseModel):
     date: dt.date
-    amount: float = Field(gt=0, description="Must be greater than 0")
+    amount_total: float = Field(gt=0.0, description="Must be greater than 0")
     currency: str
-    type: Literal["expense", "income"]
+    type: TransactionType
     description: Optional[str] = None
-    detail_json: Optional[str] = None
     account_id: int
     category_id: int
+    payer_person_id: Optional[int] = None
 
 class TransactionCreate(TransactionBase):
-    pass
+    shares: Optional[List[TransactionShareCreate]] = None
 
 class TransactionUpdate(BaseModel):
     date: Optional[dt.date] = None
-    amount: Optional[float] = None
+    amount_total: Optional[float] = None
     currency: Optional[str] = None
-    type: Optional[Literal["expense", "income"]] = None
+    type: Optional[TransactionType] = None
     description: Optional[str] = None
-    detail_json: Optional[str] = None
     account_id: Optional[int] = None
     category_id: Optional[int] = None
+    payer_person_id: Optional[int] = None
 
 class TransactionOut(TransactionBase):
     id: int
+    shares: List[TransactionShareOut] = []
     model_config = ConfigDict(from_attributes=True)
+
+# Report Schemas
+class ReportBalance(BaseModel):
+    account_id: int
+    account_name: str
+    balance: float
+
+class ReportDebt(BaseModel):
+    person_id: int
+    person_name: str
+    debt: float
+    # If debt is 0, the person is not active
+    is_active: bool

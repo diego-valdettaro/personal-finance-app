@@ -1,52 +1,48 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
 from typing import List
 from ..database import get_db
-from .. import models, schemas
+from .. import crud, schemas
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
-@router.post("/", response_model=schemas.AccountOut)
-def create_account(payload: schemas.AccountCreate, db: Session = Depends(get_db)):
-    acc = models.Account(name=payload.name, currency=payload.currency)
-    try:
-        db.add(acc)
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Account already exists")
-    db.refresh(acc)
-    return acc
+# Create an account
+@router.post("/", response_model=schemas.AccountOut, status_code=201)
+def create_account(account: schemas.AccountCreate, db: Session = Depends(get_db)):
+    db_account = crud.get_account(db, account.name)
+    if db_account:
+        raise HTTPException(status_code=400, detail="Account name already exists")
+    return crud.create_account(db, account)
 
+# List all accounts
 @router.get("/", response_model=List[schemas.AccountOut])
 def list_accounts(db: Session = Depends(get_db)):
-    return db.query(models.Account).order_by(models.Account.name).all()
+    db_accounts = crud.get_accounts(db)
+    if not db_accounts:
+        raise HTTPException(status_code=404, detail="No accounts found")
+    return db_accounts
 
+# Get an account
 @router.get("/{account_id}", response_model=schemas.AccountOut)
 def get_account(account_id: int, db: Session = Depends(get_db)):
-    acc = db.get(models.Account, account_id)
-    if not acc:
+    db_account = crud.get_account(db, account_id)
+    if not db_account:
         raise HTTPException(status_code=404, detail="Account not found")
-    return acc
+    return db_account
 
+# Update an account
 @router.patch("/{account_id}", response_model=schemas.AccountOut)
-def update_account(account_id: int, payload: schemas.AccountUpdate, db: Session = Depends(get_db)):
-    acc = db.get(models.Account,account_id)
-    if not acc:
+def update_account(account_id: int, account: schemas.AccountUpdate, db: Session = Depends(get_db)):
+    db_account = crud.get_account(db, account_id)
+    if not db_account:
         raise HTTPException(status_code=404, detail="Account not found")
-    if payload.name is not None:
-        acc.name = payload.name
-    if payload.currency is not None:
-        acc.currency = payload.currency
-    db.commit()
-    db.refresh(acc)
-    return acc
+    return crud.update_account(db, account_id, account)
 
+# Delete an account
 @router.delete("/{account_id}", status_code=204)
 def delete_account(account_id: int, db: Session = Depends(get_db)):
-    acc = db.get(models.Account, account_id)
-    if not acc:
+    db_account = crud.get_account(db, account_id)
+    if not db_account:
         raise HTTPException(status_code=404, detail="Account not found")
-    db.delete(acc)
-    db.commit()
+    crud.delete_account(db, account_id)
+    return
