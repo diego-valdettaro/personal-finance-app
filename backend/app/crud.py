@@ -210,7 +210,7 @@ def update_transaction(db: Session, transaction_id: int, transaction: schemas.Tr
     db.refresh(db_transaction)
     return db_transaction
 
-# CRUD fucntions for Report
+# CRUD functions for Report
 def get_balances(db: Session):
     balances = []
     accounts = db.query(models.Account).all()
@@ -240,3 +240,53 @@ def get_debts(db: Session):
             is_active=debt != 0
         ))
     return debts
+
+# CRUD fucntions for Budget
+
+def get_budget(db: Session, id: int, month: int):
+    return db.query(models.Budget).filter(models.Budget.id == id, models.Budget.month == month).first()
+
+def get_annual_budget(db: Session, id: int):
+    return db.query(models.Budget).filter(models.Budget.id == id).first()
+
+def create_budget(db: Session, budget: schemas.BudgetCreate):
+    db_budget = models.Budget(
+        name=budget.name,
+        year=budget.year,
+        month=budget.month,
+        category_id=budget.category_id,
+        amount=budget.amount
+    )
+    db.add(db_budget)
+    db.commit()
+    db.refresh(db_budget)
+    return db_budget
+
+def update_budget(db: Session, id: int, budget: schemas.BudgetUpdate):
+    db_budget = get_annual_budget(db, id)
+    if not db_budget:
+        raise HTTPException(status_code=404, detail="Budget not found")
+    for key, value in budget.model_dump(exclude_unset=True).items():
+        setattr(db_budget, key, value)
+    db.commit()
+    db.refresh(db_budget)
+    return db_budget
+
+def delete_budget(db: Session, id: int):
+    db_budget = get_annual_budget(db, id)
+    if not db_budget:
+        raise HTTPException(status_code=404, detail="Budget not found")
+    db.delete(db_budget)
+    db.commit()
+    return
+
+def get_budget_progress(db: Session, month: str):
+    # Get the month and year from the month string
+    month = int(month.split("-")[1])
+    year = int(month.split("-")[0])
+    # Get the budgets for the month
+    budgets = db.query(models.Budget).filter(models.Budget.month == month, models.Budget.year == year).all()
+    # Get the transactions for the month
+    transactions = db.query(models.Transaction).filter(models.Transaction.date.month == month, models.Transaction.date.year == year).all()
+    return budgets, transactions
+

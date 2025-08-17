@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field, ConfigDict, conlist
-from typing import Optional, Literal, List  
+from pydantic import BaseModel, Field, ConfigDict
+from typing import Optional, List  
 import datetime as dt
 from .models import TransactionType, ShareSource
 
@@ -112,3 +112,26 @@ class ReportDebt(BaseModel):
     debt: float
     # If debt is 0, the person is not active
     is_active: bool
+
+# Budget Schemas
+class BudgetBase(BaseModel):
+    name: str
+    year: int
+    month: int
+    category_id: int
+    amount: float
+
+class BudgetCreate(BudgetBase):
+    pass
+
+class BudgetUpdate(BaseModel):
+    name: Optional[str] = None
+    year: Optional[int] = None
+    month: Optional[int] = None
+    category_id: Optional[int] = None
+    amount: Optional[float] = None
+
+class BudgetOut(BudgetBase):
+    id: int
+    model_config = ConfigDict(from_attributes=True)
+

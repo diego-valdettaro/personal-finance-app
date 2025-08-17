@@ -46,9 +46,8 @@ class Person(Base):
     # If a person is deleted, all shares associated with them are deleted
     shares = relationship("TransactionShare", back_populates="person", cascade="all, delete-orphan")
     # Ensure that there is exactly 1 "me"
-    __table_args__ = (
-        UniqueConstraint('is_me', name='uq_one_me') 
-    )
+    __table_args__ = (Index("uq_one_me", "is_me", unique=True, sqlite_where=Text("is_me = 1")),)
+
 class Transaction(Base):
     __tablename__ = "transactions"
     id = Column(Integer, primary_key=True, index=True)
@@ -71,7 +70,7 @@ class Transaction(Base):
     shares = relationship("TransactionShare", back_populates="transaction", cascade="all, delete-orphan")
 
     __table_args__ = (
-        Index('idx_tx_date_type', date, type),
+        Index('idx_tx_date_type', 'date', 'type'),
         CheckConstraint('amount_total > 0', name='ck_tx_amount_total_positive'),
     )
 
@@ -91,4 +90,13 @@ class TransactionShare(Base):
         UniqueConstraint("transaction_id", "person_id", name="uq_share_tx_person"),
         CheckConstraint("amount >= 0", name="ck_share_amount_non_negative"),
     )
-    
+
+class Budget(Base):
+    __tablename__ = "budgets"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(20), nullable=False)
+    year = Column(Integer, nullable=False)
+    month = Column(Integer, nullable=False)
+    category_id = Column(Integer, ForeignKey("categories.id", ondelete="RESTRICT"), nullable=False)
+    category = relationship("Category", back_populates="budgets")
+    amount = Column(Float, nullable=False)

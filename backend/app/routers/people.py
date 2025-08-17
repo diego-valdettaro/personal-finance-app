@@ -15,7 +15,7 @@ def create_person(person: schemas.PersonCreate, db: Session = Depends(get_db)):
 
 # List all people
 @router.get("/", response_model=list[schemas.PersonOut])
-def list_people(db: Session = Depends(get_db)):
+def get_people(db: Session = Depends(get_db)):
     db_people = crud.get_people(db)
     if not db_people:
         raise HTTPException(status_code=404, detail="No people found")

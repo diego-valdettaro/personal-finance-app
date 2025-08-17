@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import accounts, categories, transactions, people, reports
+from .routers import accounts, categories, transactions, people, reports, budgets
 
 # Create FastAPI app
 app = FastAPI(
@@ -23,6 +23,7 @@ app.include_router(categories.router, prefix="/categories", tags=["categories"])
 app.include_router(transactions.router, prefix="/transactions", tags=["transactions"])
 app.include_router(people.router, prefix="/people", tags=["people"])
 app.include_router(reports.router, prefix="/reports", tags=["reports"])
+app.include_router(budgets.router, prefix="/budgets", tags=["budgets"])
 
 @app.get("/")
 async def root():

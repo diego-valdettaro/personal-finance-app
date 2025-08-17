@@ -1,20 +1,30 @@
-import React, { useState } from 'react'
-import TransactionForm from './components/TransactionForm'
-import TransactionsTable from './components/TransactionsTable'
+import React from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import Layout from './components/Layout';
+import DashboardPage from './pages/DashboardPage';
+import AccountsPage from './pages/AccountsPage';
+import CategoriesPage from './pages/CategoriesPage';
+import PeoplePage from './pages/PeoplePage';
+import TransactionsPage from './pages/TransactionsPage';
+import ExpensesPage from './pages/ExpensesPage';
+import DebtsPage from './pages/DebtsPage';
+import BudgetPage from './pages/BudgetPage';
 
 export default function App() {
-    
-    const [refreshKey, setRefreshKey] = useState(0)
-
     return (
-        <div className="min-h-screen bg-gray-100">
-            <div className="max-w-5xl mx-auto p-6 space-y-6">
-                <header className="flex items-center justify-between">
-                    <h1 className="text-2xl font-bold">Mis Finanzas (MVP)</h1>
-                </header>
-                <TransactionForm onCreated={() => setRefreshKey((k) => k + 1)} />
-                <TransactionsTable refreshKey={refreshKey} />
-            </div>
-        </div>
-    )
+        <Routes>
+            <Route path="/" element={<Layout />}>
+                <Route index element={<Navigate to="/dashboard" />} />
+                <Route path="dashboard" element={<DashboardPage />} />
+                <Route path="accounts" element={<AccountsPage />} />
+                <Route path="categories" element={<CategoriesPage />} />
+                <Route path="people" element={<PeoplePage />} />
+                <Route path="transactions" element={<TransactionsPage />} />
+                <Route path="expenses" element={<ExpensesPage />} />
+                <Route path="debts" element={<DebtsPage />} />
+                <Route path="budget" element={<BudgetPage />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/dashboard" />} />
+        </Routes>
+    );
 }

@@ -15,7 +15,7 @@ def create_category(category: schemas.CategoryCreate, db: Session = Depends(get_
 
 # List all categories
 @router.get("/", response_model=list[schemas.CategoryOut])
-def list_categories(db: Session = Depends(get_db)):
+def get_categories(db: Session = Depends(get_db)):
     db_categories = crud.get_categories(db)
     if not db_categories:
         raise HTTPException(status_code=404, detail="No categories found")

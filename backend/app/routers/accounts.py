@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List
 from ..database import get_db
 from .. import crud, schemas
 
@@ -15,8 +14,8 @@ def create_account(account: schemas.AccountCreate, db: Session = Depends(get_db)
     return crud.create_account(db, account)
 
 # List all accounts
-@router.get("/", response_model=List[schemas.AccountOut])
-def list_accounts(db: Session = Depends(get_db)):
+@router.get("/", response_model=list[schemas.AccountOut])
+def get_accounts(db: Session = Depends(get_db)):
     db_accounts = crud.get_accounts(db)
     if not db_accounts:
         raise HTTPException(status_code=404, detail="No accounts found")

@@ -1,9 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import Optional, List
+from typing import Optional
 from .. import crud, schemas
 from ..database import get_db
-import datetime as dt
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -19,8 +18,8 @@ def create_transaction(transaction: schemas.TransactionCreate, db: Session = Dep
     return crud.create_transaction(db, transaction)
 
 # List all transactions
-@router.get("/", response_model=List[schemas.TransactionOut])
-def list_transactions(
+@router.get("/", response_model=list[schemas.TransactionOut])
+def get_transactions(
     db: Session = Depends(get_db),
     date_from: Optional[str] = Query(default=None),
     date_to: Optional[str] = Query(default=None),
@@ -28,7 +27,10 @@ def list_transactions(
     category_id: Optional[int] = Query(default=None),
     payer_person_id: Optional[int] = Query(default=None),
 ):
-    return crud.get_transactions(db, date_from, date_to, account_id, category_id, payer_person_id)
+    db_transactions = crud.get_transactions(db, date_from, date_to, account_id, category_id, payer_person_id)
+    if not db_transactions:
+        raise HTTPException(status_code=404, detail="No transactions found")
+    return db_transactions
 
 # Get a transaction
 @router.get("/{tx_id}", response_model=schemas.TransactionOut)
@@ -54,3 +56,11 @@ def delete_transaction(tx_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Transaction not found")
     crud.delete_transaction(db, tx_id)
     return
+
+# Split a transaction
+@router.post("/{tx_id}/split", response_model=schemas.TransactionOut)
+def split_transaction(tx_id: int, payer_person_id: int, shares: list[schemas.TransactionShareCreate], db: Session = Depends(get_db)):
+    db_transaction = crud.get_transaction(db, tx_id)
+    if not db_transaction:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return crud.split_transaction(db, tx_id, payer_person_id, shares)
