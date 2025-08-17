@@ -13,20 +13,21 @@ const links: NavLinkItem[] = [
     { to: "/categories", label: "Categories" },
     { to: "/people", label: "People" },
     { to: "/transactions", label: "Transactions" },
-    { to: "/budgets", label: "Budgets" },
-    { to: "/reports", label: "Reports" },
+    { to: "/expenses", label: "Expenses" },
+    { to: "/debts", label: "Debts" },
+    { to: "/budget", label: "Budget" },
 ];    
 
 export default function Sidebar() {
     return (
-        <nav className="w-64 bg-gray-100 p-4">
+        <nav className="w-52 bg-gray-100 p-4">
             <ul className="space-y-2">
                 {links.map(({ to, label }) => (
                     <li key={to}>
                         <NavLink
                             to={to}
                             className={({ isActive }: { isActive: boolean }) =>
-                            `block p-2 rounded hover:bg-blue-200 ${isActive ? "bg-blue-300" : ""}`
+                            `block p-2 rounded hover:bg-green-200 ${isActive ? "bg-green-300" : ""}`
                             }
                         >
                             {label}

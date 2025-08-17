@@ -135,3 +135,10 @@ class BudgetOut(BudgetBase):
     id: int
     model_config = ConfigDict(from_attributes=True)
 
+# Report Schemas
+class ReportBudgetProgress(BaseModel):
+    category_id: int
+    category_name: str
+    budget: float
+    actual: float
+

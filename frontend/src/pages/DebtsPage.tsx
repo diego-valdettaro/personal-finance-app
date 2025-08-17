@@ -1,22 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { getDebts } from "../api/reports";
 import Table, { Column } from "../components/Table";
-
-export type Debt = {
-    id: number;
-    person_name: string;
-    debt: number;
-    is_active: boolean;
-};
+import { Debt } from "../types";
 
 export default function DebtsPage() {
     const [debts, setDebts] = useState<Debt[]>([]);
 
     useEffect(() => {
-        (async () => {
-            const data: Debt[] = await getDebts();
-            setDebts(data);
-        })();
+        getDebts().then((response) => setDebts(response))
     }, []);
 
     const columns: Column<Debt>[] = [

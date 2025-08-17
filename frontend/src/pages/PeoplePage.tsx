@@ -1,42 +1,27 @@
 import React, { useEffect, useState } from 'react';
 import { getPeople, createPerson, updatePerson, deletePerson } from '../api/people';
 import Table, { Column } from '../components/Table';
-
-export type Person = {
-    id: number;
-    name: string;
-    is_me: boolean;
-}
-
-type PersonCreate = {
-    name: string;
-    is_me: boolean;
-}
+import { Person, PersonCreate } from '../types';
 
 export default function PeoplePage() {
     const [people, setPeople] = useState<Person[]>([]);
     const [form, setForm] = useState<PersonCreate>({ name: "", is_me: false });
 
-    const loadPeople = async () => {
-        const data: Person[] = await getPeople();
-        setPeople(data);
-    }
-
     useEffect(() => {
-        loadPeople();
+        getPeople().then((response) => setPeople(response))
     }, []);
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         await createPerson(form);
         setForm({ name: "", is_me: false });
-        loadPeople();
+        getPeople().then((response) => setPeople(response))
     }
 
     const handleDeleteRow = async (row: Person) => {
         if (window.confirm("Are you sure you want to delete this person?")) {
             await deletePerson(row.id);
-            loadPeople();
+            getPeople().then((response) => setPeople(response))
         }
     }
 

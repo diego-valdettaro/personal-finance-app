@@ -1,11 +1,21 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import accounts, categories, transactions, people, reports, budgets
+from .database import Base, engine
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    Base.metadata.create_all(bind=engine)
+    yield
+    # Shutdown (if needed)
 
 # Create FastAPI app
 app = FastAPI(
     title="Finance Tracker API",
-    description="API for managing finance data"
+    description="API for managing finance data",
+    lifespan=lifespan
 )
 
 # Configure CORS to allow requests from the frontend
@@ -18,12 +28,12 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(accounts.router, prefix="/accounts", tags=["accounts"])
-app.include_router(categories.router, prefix="/categories", tags=["categories"])
-app.include_router(transactions.router, prefix="/transactions", tags=["transactions"])
-app.include_router(people.router, prefix="/people", tags=["people"])
-app.include_router(reports.router, prefix="/reports", tags=["reports"])
-app.include_router(budgets.router, prefix="/budgets", tags=["budgets"])
+app.include_router(accounts.router)
+app.include_router(categories.router)
+app.include_router(transactions.router)
+app.include_router(people.router)
+app.include_router(reports.router)
+app.include_router(budgets.router)
 
 @app.get("/")
 async def root():

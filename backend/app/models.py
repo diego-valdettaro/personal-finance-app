@@ -35,6 +35,7 @@ class Category(Base):
     type = Column(Enum(TransactionType), nullable=False)
     # If a category is deleted, all transactions associated with it are deleted 
     transactions = relationship("Transaction", back_populates="category", cascade="all, delete-orphan")
+    budgets = relationship("Budget", back_populates="category", cascade="all, delete-orphan")
 
 class Person(Base):
     __tablename__ = "people"
@@ -88,7 +89,7 @@ class TransactionShare(Base):
     
     __table_args__ = (
         UniqueConstraint("transaction_id", "person_id", name="uq_share_tx_person"),
-        CheckConstraint("amount >= 0", name="ck_share_amount_non_negative"),
+        CheckConstraint("amount_share >= 0", name="ck_share_amount_non_negative"),
     )
 
 class Budget(Base):

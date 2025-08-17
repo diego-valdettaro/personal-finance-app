@@ -1,17 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { getCategories, createCategory, updateCategory, deleteCategory } from '../api/categories';
 import Table, { Column } from '../components/Table';
-
-export type Category = {
-    id: number;
-    name: string;
-    type: "income" | "expense";
-};
-
-type CategoryCreate = {
-    name: string;
-    type: "income" | "expense";
-};
+import { Category, CategoryCreate } from '../types';
 
 export default function CategoriesPage() {
     const [categories, setCategories] = useState<Category[]>([]);
@@ -20,26 +10,21 @@ export default function CategoriesPage() {
         type: "expense",
     });
 
-    const loadCategories = async () => {
-        const data: Category[] = await getCategories();
-        setCategories(data);
-    }
-
     useEffect(() => {
-        loadCategories();
+        getCategories().then((response) => setCategories(response))
     }, []);
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         await createCategory(form);
         setForm({ name: "", type: "expense" });
-        loadCategories();
+        getCategories().then((response) => setCategories(response))
     }
 
     const handleDeleteRow = async (row: Category) => {
         if (window.confirm("Are you sure you want to delete this category?")) {
             await deleteCategory(row.id);
-            loadCategories();
+            getCategories().then((response) => setCategories(response))
         }
     }
     

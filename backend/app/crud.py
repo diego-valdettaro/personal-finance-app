@@ -7,7 +7,10 @@ def get_accounts(db: Session):
     return db.query(models.Account).all()
 
 def get_account(db: Session, account_id: int):
-    return db.get(models.Account, account_id)
+    db_account = db.get(models.Account, account_id)
+    if not db_account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return db_account
 
 def create_account(db: Session, account: schemas.AccountCreate):
     db_account = models.Account(
@@ -43,7 +46,10 @@ def get_categories(db: Session):
     return db.query(models.Category).all()
 
 def get_category(db: Session, category_id: int):
-    return db.get(models.Category, category_id)
+    db_category = db.get(models.Category, category_id)
+    if not db_category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    return db_category
 
 def create_category(db: Session, category: schemas.CategoryCreate):
     db_category = models.Category(
@@ -78,13 +84,12 @@ def get_people(db: Session):
     return db.query(models.Person).all()
 
 def get_person(db: Session, person_id: int):
-    return db.get(models.Person, person_id)
+    db_person = db.get(models.Person, person_id)
+    if not db_person:
+        raise HTTPException(status_code=404, detail="Person not found")
+    return db_person
 
 def create_person(db: Session, person: schemas.PersonCreate):
-    # Validate that there is only one "me"
-    if person.is_me:
-        if db.query(models.Person).filter(models.Person.is_me == True).count() > 0:
-            raise HTTPException(status_code=400, detail="Only one 'me' person is allowed")
     db_person = models.Person(
         name=person.name,
         is_me=person.is_me
@@ -141,9 +146,34 @@ def _replace_shares(db: Session, db_transaction: models.Transaction, shares: lis
     return db_transaction
 
 def get_transaction(db: Session, transaction_id: int):
-    return db.get(models.Transaction, transaction_id)
+    db_transaction = db.get(models.Transaction, transaction_id)
+    if not db_transaction:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return db_transaction
     
 def create_transaction(db: Session, transaction: schemas.TransactionCreate):
+    # Validate account exists
+    db_account = db.get(models.Account, transaction.account_id)
+    if not db_account:
+        raise HTTPException(status_code=400, detail=f"Account with id {transaction.account_id} not found")
+    
+    # Validate category exists
+    db_category = db.get(models.Category, transaction.category_id)
+    if not db_category:
+        raise HTTPException(status_code=400, detail=f"Category with id {transaction.category_id} not found")
+    
+    # If no payer_person_id is provided, default value is the "me" person
+    if transaction.payer_person_id is None:
+        db_person = db.query(models.Person).filter(models.Person.is_me == True).first()
+        if not db_person:
+            raise HTTPException(status_code=400, detail="No default person found (is_me=True)")
+        transaction.payer_person_id = db_person.id
+    else:
+        # Validate person exists
+        db_person = db.get(models.Person, transaction.payer_person_id)
+        if not db_person:
+            raise HTTPException(status_code=400, detail=f"Person with id {transaction.payer_person_id} not found")
+
     db_transaction = models.Transaction(
         date=transaction.date,
         amount_total=transaction.amount_total,
@@ -244,10 +274,16 @@ def get_debts(db: Session):
 # CRUD fucntions for Budget
 
 def get_budget(db: Session, id: int, month: int):
-    return db.query(models.Budget).filter(models.Budget.id == id, models.Budget.month == month).first()
+    db_budget = db.query(models.Budget).filter(models.Budget.id == id, models.Budget.month == month).first()
+    if not db_budget:
+        raise HTTPException(status_code=404, detail="Budget not found")
+    return db_budget
 
 def get_annual_budget(db: Session, id: int):
-    return db.query(models.Budget).filter(models.Budget.id == id).first()
+    db_budget = db.query(models.Budget).filter(models.Budget.id == id).first()
+    if not db_budget:
+        raise HTTPException(status_code=404, detail="Budget not found")
+    return db_budget
 
 def create_budget(db: Session, budget: schemas.BudgetCreate):
     db_budget = models.Budget(

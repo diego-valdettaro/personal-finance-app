@@ -1,21 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { getBalances } from "../api/reports";
 import Card from "../components/Card";
-
-type BalanceRow = {
-    id?: number | string;
-    account_name?: string;
-    balance: number;
-}
+import { BalanceRow } from "../types";
 
 export default function DashboardPage() {
     const [balances, setBalances] = useState<BalanceRow[]>([]);
 
     useEffect(() => {
-        (async () => {
-            const data: BalanceRow[] = await getBalances();
-            setBalances(data);
-        })();
+        getBalances().then((data) => setBalances(data))
     }, []);
 
     const totalBalance = balances.reduce((sum, b) => sum + Number(b.balance), 0);

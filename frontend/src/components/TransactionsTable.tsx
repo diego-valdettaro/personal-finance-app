@@ -1,22 +1,29 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { api } from '../api'
-import type { Transaction, Category } from '../types'
+import { getTransactions, deleteTransaction, updateTransaction } from '../api/transactions'
+import { getCategories } from '../api/categories'
+import type { Transaction, Category, Person, Account } from '../types'
+import { getPeople } from '../api/people'
+import { getAccounts } from '../api/accounts'
 
-type Editable = Pick<Transaction, 'id' | 'date' | 'amount' | 'category_id' | 'type' | 'currency' | 'description'>
+type Editable = Pick<Transaction, 'id' | 'date' | 'amount_total' | 'category_id' | 'type' | 'currency' | 'description'>
 
 export default function TransactionsTable({ refreshKey }: { refreshKey: number }) {
     
     const [items, setItems] = useState<Transaction[]>([])
     const [categories, setCategories] = useState<Category[]>([])
+    const [people, setPeople] = useState<Person[]>([])
+    const [accounts, setAccounts] = useState<Account[]>([])
     // To manage state of the modal
     const [editing, setEditing] = useState<Editable | null>(null)
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState<string | null>(null)
 
     useEffect(() => {
-        api<Transaction[]>('/transactions/?limit=100').then(setItems)
-        api<Category[]>('/categories/').then(setCategories)
-    }, [refreshKey])
+        getTransactions().then((response) => setItems(response))
+        getCategories().then((response) => setCategories(response))
+        getPeople().then((response) => setPeople(response))
+        getAccounts().then((response) => setAccounts(response))
+    }, [refreshKey])    
 
     const categoryNameById = useMemo(() => {
         return new Map(categories.map(c => [c.id, c.name]))
@@ -29,7 +36,7 @@ export default function TransactionsTable({ refreshKey }: { refreshKey: number }
         setItems((xs) => xs.filter((x) => x.id !== id))
 
         try{
-            await api<void>(`/transactions/${id}`, {method: 'DELETE'})
+            await deleteTransaction(id)
         } catch (e) {
             console.error(e)
             alert('Failed to delete. Restoring item.')
@@ -47,7 +54,7 @@ export default function TransactionsTable({ refreshKey }: { refreshKey: number }
         setEditing({
             id: t.id,
             date: toYmd(t.date),
-            amount: t.amount,
+            amount_total: t.amount_total,
             category_id: t.category_id,
             type: t.type,
             currency: t.currency,
@@ -73,11 +80,7 @@ export default function TransactionsTable({ refreshKey }: { refreshKey: number }
         setItems(optimistic)
 
         try {
-            const updated = await api<Transaction>(`/transactions/${editing.id}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(editing)
-            })
+            const updated = await updateTransaction(editing.id, editing)
             setItems((xs) => xs.map((x) => x.id === updated.id ? updated: x))
             setEditing(null)
         } catch (e: any) {
@@ -112,7 +115,7 @@ export default function TransactionsTable({ refreshKey }: { refreshKey: number }
                     {items.map((t) => (
                         <tr key={t.id} className="border-t">
                             <td className="p-2">{t.date}</td>
-                            <td className="p-2">{t.amount.toFixed(2)}</td>
+                            <td className="p-2">{t.amount_total.toFixed(2)}</td>
                             <td className="p-2">
                                 {categoryNameById.get(t.category_id) ?? '-'}
                             </td>
@@ -152,8 +155,8 @@ export default function TransactionsTable({ refreshKey }: { refreshKey: number }
                                 type="number"
                                 step="0.01"
                                 className="border rounded-lg p-2"
-                                value={editing.amount}
-                                onChange={e => setEditing({ ...editing, amount: Number(e.target.value) })}
+                                value={editing.amount_total}
+                                onChange={e => setEditing({ ...editing, amount_total: Number(e.target.value) })}
                             />
                         </label>
 

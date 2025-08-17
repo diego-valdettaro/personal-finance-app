@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from .. import crud, schemas
 from ..database import get_db
@@ -13,32 +13,20 @@ def create_budget(budget: schemas.BudgetCreate, db: Session = Depends(get_db)):
 # Get monthly budget
 @router.get("/{id}/{month}", response_model=schemas.BudgetOut)
 def get_budget(id: int, month: int, db: Session = Depends(get_db)):
-    db_budget = crud.get_budget(db, id, month)
-    if not db_budget:
-        raise HTTPException(status_code=404, detail="Budget not found")
-    return db_budget
+    return crud.get_budget(db, id, month)
 
 # Get annual budget
 @router.get("/{id}", response_model=schemas.BudgetOut)
 def get_annual_budget(id: int, db: Session = Depends(get_db)):
-    db_budget = crud.get_annual_budget(db, id)
-    if not db_budget:
-        raise HTTPException(status_code=404, detail="Budget not found")
-    return db_budget
+    return crud.get_annual_budget(db, id)
 
 # Update a yearly budget
 @router.patch("/{id}", response_model=schemas.BudgetUpdate)
 def update_budget(id: int, budget: schemas.BudgetUpdate, db: Session = Depends(get_db)):
-    db_budget = crud.get_annual_budget(db, id)
-    if not db_budget:
-        raise HTTPException(status_code=404, detail="Budget not found")
     return crud.update_budget(db, id, budget)
 
 # Delete a yearly budget
 @router.delete("/{id}", status_code=204)
 def delete_budget(id: int, db: Session = Depends(get_db)):
-    db_budget = crud.get_annual_budget(db, id)
-    if not db_budget:
-        raise HTTPException(status_code=404, detail="Budget not found")
     crud.delete_budget(db, id)
     return

@@ -1,68 +1,50 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { getTransactions, getTransaction, deleteTransaction, updateTransaction, splitTransaction } from "../api/transactions";
 import { getPeople } from "../api/people";
+import { getCategories } from "../api/categories";
+import { getAccounts } from "../api/accounts";
 import Table, { Column } from "../components/Table";
 import SplitModal from "../components/SplitModal";
-
-export type Person = {
-    id: number;
-    name: string;
-    is_me: boolean;
-};
-
-export type Transaction = {
-    id: number;
-    date: string;
-    description?: string | null;
-    amount_total: number;
-    account_id: number;
-    category_id: number;
-    payer_person_id: number;
-};
-
-export type TransactionFilters = Partial<{
-    date_from: string;
-    date_to: string;
-    account_id: number;
-    category_id: number;
-    payer_person_id: number;
-}>;
-
-export type SplitPayload = {
-    payer_person_id: number;
-    shares: {
-        person_id: number;
-        amount: number;
-        source: "user_manual";
-    }[];
-};
+import { Transaction, TransactionFilters, Person, SplitPayload, Category, Account } from "../types";
 
 export default function TransactionsPage() {
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [filters, setFilters] = useState<TransactionFilters>({});
     const [people, setPeople] = useState<Person[]>([]);
+    const [categories, setCategories] = useState<Category[]>([]);
+    const [accounts, setAccounts] = useState<Account[]>([]);
     const [showSplitModal, setShowSplitModal] = useState(false);
     const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+    
+    useEffect(() => {
+        getTransactions(filters).then((response) => setTransactions(response))
+        getPeople().then((response) => setPeople(response))
+        getCategories().then((response) => setCategories(response))
+        getAccounts().then((response) => setAccounts(response))
+    }, []);
+    
+    // Create a mapping for category names
+    const categoryNameById = useMemo<Map<Category["id"], Category["name"]>>(() => {
+        return new Map(categories.map(c => [c.id, c.name]))
+    }, [categories]);
 
-    const loadTransactions = async () => {
-        const data: Transaction[] = await getTransactions(filters);
-        setTransactions(data);
-    };
+    const accountNameById = useMemo<Map<Account["id"], Account["name"]>>(() => {
+        return new Map(accounts.map(a => [a.id, a.name]))
+    }, [accounts]);
+
+    const payerNameById = useMemo<Map<Person["id"], Person["name"]>>(() => {
+        return new Map(people.map(p => [p.id, p.name]))
+    }, [people]);
 
     const loadPeople = async () => {
         const data: Person[] = await getPeople();
         setPeople(data);
-    };
-    
-    useEffect(() => {
-        loadTransactions();
-        loadPeople();
-    }, []);
+};
 
     const handleDeleteRow = async (row: Transaction) => {
         if (window.confirm("Are you sure you want to delete this transaction?")) {
             await deleteTransaction(row.id);
-            loadTransactions();
+            getTransactions(filters).then((response) => setTransactions(response))
         }
     };
 
@@ -78,16 +60,29 @@ export default function TransactionsPage() {
         await splitTransaction(selectedTransaction.id, payload);
         setShowSplitModal(false);
         setSelectedTransaction(null);
-        loadTransactions();
+        getTransactions(filters).then((response) => setTransactions(response))
     };
 
     const columns: Column<Transaction>[] = [
-        { label: "Date", accessor: "date" },
-        { label: "Account", accessor: "account_id" },
-        { label: "Category", accessor: "category_id" },
-        { label: "Payer", accessor: "payer_person_id" },
         { label: "Amount", accessor: "amount_total" },
+        { label: "Date", accessor: "date" },
+        { 
+            label: "Category", 
+            accessor: "category_id",
+            Cell: (value: number) => categoryNameById.get(value) ?? `Unknown (${value})`
+        },
+        { 
+            label: "Account", 
+            accessor: "account_id",
+            Cell: (value: number) => accountNameById.get(value) ?? `Unknown (${value})`
+        },
+        { label: "Currency", accessor: "currency" },
         { label: "Description", accessor: "description" },
+        { 
+            label: "Payer", 
+            accessor: "payer_person_id",
+            Cell: (value: number) => payerNameById.get(value) ?? `Unknown (${value})`
+        },
     ];
 
     return (

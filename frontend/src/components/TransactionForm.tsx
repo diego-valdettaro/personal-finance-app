@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react'
-import { api } from '../api'
+import { createTransaction } from '../api/transactions'
 import type { Account, Category } from '../types'
-import { toProperCase } from '../utils/string'
+import { getCategories } from '../api/categories'
+import { getAccounts } from '../api/accounts'
 
 type Props = { onCreated: () => void }
 
@@ -23,8 +24,8 @@ export default function TransactionForm({ onCreated }: Props){
 
     // Call the backend api and populate Accounts and Categories lists
     useEffect(() => {
-        api<Account[]>('/accounts/').then(setAccounts)
-        api<Category[]>('/categories/').then(setCategories)
+        getAccounts().then((response) => setAccounts(response.data))
+        getCategories().then((response) => setCategories(response.data))
     }, [])
 
     // Function to handle a change in value of inputs or selects
@@ -51,7 +52,7 @@ export default function TransactionForm({ onCreated }: Props){
         e.preventDefault()
 
         // Send the form as JSON to the backend
-        await api('/transactions/', { method: 'POST', body: JSON.stringify(form) })
+        await createTransaction(form)
 
         // Soft reset: keep date, type, currency, account/category; clear amount & description
         setForm((f) => ({ ...f, amount: 0, description: ''}))
@@ -102,7 +103,7 @@ export default function TransactionForm({ onCreated }: Props){
                         <option value={0}>Selecciona…</option>
                             {categories.map((c) => (
                                 <option key={c.id} value={c.id}>
-                                    {toProperCase(c.name)}
+                                    {c.name}
                                 </option>
                             ))}
                     </select>

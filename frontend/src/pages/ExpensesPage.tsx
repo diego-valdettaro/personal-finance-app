@@ -3,46 +3,7 @@ import { createTransaction } from "../api/transactions";
 import { getAccounts } from "../api/accounts";
 import { getCategories } from "../api/categories";
 import { getPeople } from "../api/people";
-
-type Account = {
-    id: number;
-    name: string;
-    currency: string;
-    opening_balance: number;
-};
-
-type Category = {
-    id: number;
-    name: string;
-    type: "income" | "expense";
-};
-
-type Person = {
-    id: number;
-    name: string;
-    is_me: boolean;
-};
-
-type ExpenseForm = {
-    date: string;
-    amount_total: number;
-    currency: string;
-    description: string;
-    account_id: number | "";
-    category_id: number | "";
-    payer_person_id: number | "";
-};
-
-type TransactionCreateExpense = {
-    date: string;
-    amount_total: number;
-    currency: string;
-    description: string;
-    account_id: number;
-    category_id: number;
-    payer_person_id: number;
-    type: "expense";	
-};
+import { Account, Category, Person, ExpenseForm, TransactionCreateExpense } from "../types";
 
 export default function ExpensesPage() {
     const [accounts, setAccounts] = useState<Account[]>([]);
@@ -59,16 +20,9 @@ export default function ExpensesPage() {
     });
 
     useEffect(() => {
-        (async () => {
-            const [accounts, categories, people] = await Promise.all([
-                getAccounts() as Promise<Account[]>,
-                getCategories() as Promise<Category[]>,
-                getPeople() as Promise<Person[]>,
-            ]);
-            setAccounts(accounts);
-            setCategories(categories);
-            setPeople(people);
-        })();
+        getAccounts().then((response) => setAccounts(response))
+        getCategories().then((response) => setCategories(response))
+        getPeople().then((response) => setPeople(response))
     }, []);
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
