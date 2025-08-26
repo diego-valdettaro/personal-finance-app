@@ -123,8 +123,8 @@ class TxBase(BaseModel):
     description: Optional[str] = None
     amount_hc: float = Field(gt=0.0)
     source: TxSource
-    postings: list[TxPostingCreateAutomatic] = []
-    splits: list[TxSplitCreate] = []
+    postings: list[TxPostingCreateAutomatic] = Field(default_factory=list)
+    splits: list[TxSplitCreate] = Field(default_factory=list)
 
 class TxCreate(TxBase):
     user_id: int

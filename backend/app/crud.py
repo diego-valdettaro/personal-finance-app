@@ -10,40 +10,39 @@ from sqlalchemy import func
 #--------------------------------
 def _validate_unique_user(db: Session, name: str, email: str | None, exclude_id: int | None = None) -> None:
     query = db.query(models.User)
-    if name:
-        q = query.filter(models.User.name == name)
-        if exclude_id:
-            q = q.filter(models.User.id != exclude_id)
-        if q.first():
-            raise HTTPException(status_code=409, detail=f"User with name {name} already exists")
+    q = query.filter(models.User.name == name)
     if email:
         q = query.filter(models.User.email == email)
-        if exclude_id:
-            q = q.filter(models.User.id != exclude_id)
-        if q.first():
-            raise HTTPException(status_code=409, detail=f"User with email {email} already exists")
+    if exclude_id:
+        q = q.filter(models.User.id != exclude_id)
+    if q.first():
+        raise HTTPException(status_code=409, detail=f"User with name {name} or email {email} already exists")
 
-def _validate_unique_person(db: Session, name: str, is_me: bool, user_id: int, exclude_id: int | None = None) -> None:
+def _validate_unique_person(db: Session, user_id: int, name: str, is_me: bool, exclude_id: int | None = None) -> None:
     query = db.query(models.Person)
-    if name:
-        q = query.filter(models.Person.name == name)
-        if exclude_id:
-            q = q.filter(models.Person.id != exclude_id)
-        if q.first():
-            raise HTTPException(status_code=409, detail=f"Person with name {name} already exists for user {user_id}")
+    q = query.filter(
+        models.Person.user_id == user_id,
+        models.Person.name == name
+    )
+    if exclude_id:
+        q = q.filter(models.Person.id != exclude_id)
+    if q.first():
+        raise HTTPException(status_code=409, detail=f"Person with name {name} already exists for user {user_id}")
     if is_me:
-        q = query.filter(models.Person.is_me == True)
+        q = q.filter(models.Person.is_me == is_me)
         if q.first():
             raise HTTPException(status_code=409, detail=f"User {user_id} already has a me person defined")
 
-def _validate_unique_account(db: Session, name: str, user_id: int, exclude_id: int | None = None) -> None:
-    query = db.query(models.Account)
-    if name:
-        q = query.filter(models.Account.name == name)
-        if exclude_id:
-            q = q.filter(models.Account.id != exclude_id)
-        if q.first():
-            raise HTTPException(status_code=409, detail=f"Account with name {name} already exists for user {user_id}")
+def _validate_unique_account(db: Session, user_id: int, name: str, exclude_id: int | None = None) -> None:
+    query = db.query(models.Account)    
+    q = query.filter(
+        models.Account.user_id == user_id,
+        models.Account.name == name
+    )
+    if exclude_id:
+        q = q.filter(models.Account.id != exclude_id)
+    if q.first():
+        raise HTTPException(status_code=409, detail=f"Account with name {name} already exists for user {user_id}")
 
 # Helper function to replace the shares of a transaction
 def _replace_shares(db: Session, db_transaction: models.Transaction, shares: list[schemas.TransactionShareCreate]) -> models.Transaction:
@@ -356,9 +355,9 @@ def get_person(db: Session, user_id: int, person_id: int):
 def create_person(db: Session, person: schemas.PersonCreate):
     _validate_unique_person(db, person.name, person.is_me, person.user_id)
     db_person = models.Person(
+        user_id=person.user_id,
         name=person.name,
         is_me=person.is_me,
-        user_id=person.user_id
     )
     db.add(db_person)
     try:
@@ -369,11 +368,11 @@ def create_person(db: Session, person: schemas.PersonCreate):
     db.refresh(db_person)
     return db_person
 
-def update_person(db: Session, person_id: int, person: schemas.PersonUpdate):
-    db_person = get_person(db, person_id)
+def update_person(db: Session, user_id: int, person_id: int, person: schemas.PersonUpdate):
+    db_person = get_person(db, user_id, person_id)
     if not db_person:
         raise HTTPException(status_code=404, detail="Person not found")
-    _validate_unique_person(db, person.name, person.is_me, person.user_id, person_id)
+    _validate_unique_person(db, person.name, person.is_me, user_id, person_id)
     for key, value in person.model_dump(exclude_unset=True).items():
         setattr(db_person, key, value)
     try:
@@ -384,8 +383,8 @@ def update_person(db: Session, person_id: int, person: schemas.PersonUpdate):
     db.refresh(db_person)
     return db_person
 
-def deactivate_person(db: Session, person_id: int):
-    db_person = get_person(db, person_id)
+def deactivate_person(db: Session, user_id: int, person_id: int):
+    db_person = get_person(db, user_id, person_id)
     if not db_person:
         raise HTTPException(status_code=404, detail="Person not found")
     db_person.active = False
@@ -393,8 +392,8 @@ def deactivate_person(db: Session, person_id: int):
     db.refresh(db_person)
     return db_person
 
-def activate_person(db: Session, person_id: int):
-    db_person = get_person(db, person_id)
+def activate_person(db: Session, user_id: int, person_id: int):
+    db_person = get_person(db, user_id, person_id)
     if not db_person:
         raise HTTPException(status_code=404, detail="Person not found")
     db_person.active = True
@@ -422,6 +421,7 @@ def get_account(db: Session, user_id: int, account_id: int):
 def create_account(db: Session, account: schemas.AccountCreate):
     _validate_unique_account(db, account.name, account.user_id)
     db_account = models.Account(
+        user_id=account.user_id,
         name=account.name,
         type=account.type,
         currency=account.currency,    
@@ -438,11 +438,11 @@ def create_account(db: Session, account: schemas.AccountCreate):
     db.refresh(db_account)
     return db_account
 
-def update_account(db: Session, account_id: int, account: schemas.AccountUpdate):
-    db_account = get_account(db, account.user_id, account_id)
+def update_account(db: Session, user_id: int, account_id: int, account: schemas.AccountUpdate):
+    db_account = get_account(db, user_id, account_id)
     if not db_account:
         raise HTTPException(status_code=404, detail="Account not found")
-    _validate_unique_account(db, account.name, account.user_id, account_id)
+    _validate_unique_account(db, account.name, user_id, account_id)
     for key, value in account.model_dump(exclude_unset=True).items():
         setattr(db_account, key, value)
     try:

@@ -120,9 +120,9 @@ class Transaction(Base, softDelete):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
 
     # Relationships
-    user: Mapped["User"] = relationship(back_populates="transactions")
-    postings: Mapped[List["TxPosting"]] = relationship(back_populates="transaction")
-    splits: Mapped[List["TxSplit"]] = relationship(back_populates="transaction")
+    user: Mapped["User"] = relationship(back_populates="txs")
+    postings: Mapped[List["TxPosting"]] = relationship(back_populates="tx")
+    splits: Mapped[List["TxSplit"]] = relationship(back_populates="tx")
 
     # Constraints
     __table_args__ = (
