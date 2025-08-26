@@ -4,6 +4,7 @@ import { getAccounts } from "../api/accounts";
 import { getCategories } from "../api/categories";
 import { getPeople } from "../api/people";
 import { Account, Category, Person, ExpenseForm, TransactionCreateExpense } from "../types";
+import CSVImport from "../components/CSVImport";
 
 export default function ExpensesPage() {
     const [accounts, setAccounts] = useState<Account[]>([]);
@@ -58,9 +59,28 @@ export default function ExpensesPage() {
         });
     };
 
+    const handleCSVImport = async (transactions: TransactionCreateExpense[]) => {
+        try {
+            // Create all transactions sequentially
+            for (const transaction of transactions) {
+                await createTransaction(transaction);
+            }
+        } catch (error) {
+            console.error('Error importing transactions:', error);
+            throw error;
+        }
+    };
+
     return (
         <div>
           <h1 className="text-xl font-bold mb-4">Expenses</h1>
+          
+          <CSVImport
+            accounts={accounts}
+            categories={categories}
+            people={people}
+            onImport={handleCSVImport}
+          />
     
           <form onSubmit={handleSubmit} className="space-y-2">
             <input
@@ -84,15 +104,18 @@ export default function ExpensesPage() {
               }
             />
     
-            <input
-              type="text"
+            <select
               className="border p-1 block"
-              placeholder="Currency"
               value={form.currency}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
                 setForm({ ...form, currency: e.target.value })
               }
-            />
+            >
+              <option value="">Currency</option>
+              <option value="USD">USD</option>
+              <option value="EUR">EUR</option>
+              <option value="PEN">PEN</option>
+            </select>
     
             <input
               type="text"

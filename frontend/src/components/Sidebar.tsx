@@ -9,9 +9,7 @@ type NavLinkItem = {
 const links: NavLinkItem[] = [
     // This router is not implemented yet
     { to: "/dashboard", label: "Dashboard" },
-    { to: "/accounts", label: "Accounts" },
-    { to: "/categories", label: "Categories" },
-    { to: "/people", label: "People" },
+    { to: "/management", label: "Management" },
     { to: "/transactions", label: "Transactions" },
     { to: "/expenses", label: "Expenses" },
     { to: "/debts", label: "Debts" },

@@ -15,6 +15,7 @@ export default function TransactionsPage() {
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [showSplitModal, setShowSplitModal] = useState(false);
     const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+    const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
     
     useEffect(() => {
         getTransactions(filters).then((response) => setTransactions(response))
@@ -28,18 +29,10 @@ export default function TransactionsPage() {
         return new Map(categories.map(c => [c.id, c.name]))
     }, [categories]);
 
+    // Create a mapping for account names
     const accountNameById = useMemo<Map<Account["id"], Account["name"]>>(() => {
         return new Map(accounts.map(a => [a.id, a.name]))
     }, [accounts]);
-
-    const payerNameById = useMemo<Map<Person["id"], Person["name"]>>(() => {
-        return new Map(people.map(p => [p.id, p.name]))
-    }, [people]);
-
-    const loadPeople = async () => {
-        const data: Person[] = await getPeople();
-        setPeople(data);
-};
 
     const handleDeleteRow = async (row: Transaction) => {
         if (window.confirm("Are you sure you want to delete this transaction?")) {
@@ -48,6 +41,24 @@ export default function TransactionsPage() {
         }
     };
 
+    const handleEditRow = (row: Transaction) => {
+        setEditingTransaction(row);
+    };
+
+    const handleSaveRow = async (updatedTransaction: Transaction) => {
+        try {
+            await updateTransaction(updatedTransaction.id, updatedTransaction);
+            setEditingTransaction(null);
+            getTransactions(filters).then((response) => setTransactions(response));
+        } catch (error) {
+            console.error('Error updating transaction:', error);
+        }
+    };
+
+    const handleCancelEdit = (row: Transaction) => {
+        setEditingTransaction(null);
+    };
+    
     const handleOpenSplitModal = (row: Transaction) => {
         setSelectedTransaction(row);
         setShowSplitModal(true);
@@ -64,24 +75,55 @@ export default function TransactionsPage() {
     };
 
     const columns: Column<Transaction>[] = [
-        { label: "Amount", accessor: "amount_total" },
-        { label: "Date", accessor: "date" },
+        { 
+            label: "Amount", 
+            accessor: "amount_total", 
+            editable: true, 
+            type: "number" 
+        },
+        { 
+            label: "Date", 
+            accessor: "date", 
+            editable: true, 
+            type: "date" 
+        },
         { 
             label: "Category", 
             accessor: "category_id",
-            Cell: (value: number) => categoryNameById.get(value) ?? `Unknown (${value})`
+            editable: true,
+            type: "select",
+            options: categories.map(c => ({ value: c.id, label: c.name })),
+            Cell: (value: string | number | undefined) => {
+                if (typeof value === 'number') {
+                    return categoryNameById.get(value) ?? `Unknown (${value})`;
+                }
+                return value || 'N/A';
+            }
         },
         { 
             label: "Account", 
             accessor: "account_id",
-            Cell: (value: number) => accountNameById.get(value) ?? `Unknown (${value})`
+            editable: true,
+            type: "select",
+            options: accounts.map(a => ({ value: a.id, label: a.name })),
+            Cell: (value: string | number | undefined) => {
+                if (typeof value === 'number') {
+                    return accountNameById.get(value) ?? `Unknown (${value})`;
+                }
+                return value || 'N/A';
+            }
         },
-        { label: "Currency", accessor: "currency" },
-        { label: "Description", accessor: "description" },
         { 
-            label: "Payer", 
-            accessor: "payer_person_id",
-            Cell: (value: number) => payerNameById.get(value) ?? `Unknown (${value})`
+            label: "Currency", 
+            accessor: "currency", 
+            editable: true, 
+            type: "text" 
+        },
+        { 
+            label: "Description", 
+            accessor: "description", 
+            editable: true, 
+            type: "text" 
         },
     ];
 
@@ -92,7 +134,10 @@ export default function TransactionsPage() {
             columns={columns}
             data={transactions}
             onDelete={handleDeleteRow}
-            onEdit={handleOpenSplitModal}
+            onEdit={handleEditRow}
+            onSave={handleSaveRow}
+            onCancel={handleCancelEdit}
+            editingRow={editingTransaction}
           />
     
           {(showSplitModal && selectedTransaction) && (

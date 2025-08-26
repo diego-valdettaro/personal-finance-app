@@ -1,110 +1,193 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List  
-import datetime as dt
-from .models import TransactionType, ShareSource
+from typing import Optional
+from datetime import datetime
+from .models import AccountType, TxSource, TxType
 
-# Account Schemas
-class AccountBase(BaseModel):
+#--------------------------------
+# User Schemas
+#--------------------------------
+class UserBase(BaseModel):
     name: str = Field(min_length=1, max_length=100)
-    currency: str = Field(min_length=3, max_length=3)
-    opening_balance: float = Field(ge=0)
+    email: Optional[str] = None
+    home_currency: str = Field(min_length=3, max_length=3)
 
-class AccountCreate(AccountBase):
+class UserCreate(UserBase):
     pass
 
-class AccountUpdate(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    currency: Optional[str] = Field(default=None, min_length=3, max_length=3)
-    opening_balance: Optional[float] = Field(default=None, ge=0)
+class UserUpdate(BaseModel):
+    name: Optional[str] = Field(min_length=1, max_length=100)
+    email: Optional[str] = None
+    home_currency: Optional[str] = Field(min_length=3, max_length=3)
 
-class AccountOut(AccountBase):
+class UserOut(UserBase):
     id: int
     model_config = ConfigDict(from_attributes=True)
 
-# Category Schemas
-class CategoryBase(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
-    type: TransactionType
-
-class CategoryCreate(CategoryBase):
-    pass
-
-class CategoryUpdate(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    type: Optional[TransactionType] = None
-
-class CategoryOut(CategoryBase):
-    id: int
-    model_config = ConfigDict(from_attributes=True)
-
+#--------------------------------
 # Person Schemas
+#--------------------------------
+
 class PersonBase(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     is_me: bool = Field(default=False)
 
 class PersonCreate(PersonBase):
-    pass
+    user_id: int
 
 class PersonUpdate(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    is_me: Optional[bool] = None
+    name: Optional[str] = Field(min_length=1, max_length=100)
+    is_me: Optional[bool] = Field(default=False)
 
 class PersonOut(PersonBase):
     id: int
     model_config = ConfigDict(from_attributes=True)
 
-# Transaction Share Schemas
-class TransactionShareBase(BaseModel):
-    person_id: int
-    amount_share: float = Field(ge=0.0, description="Must be greater than 0")
-    source: ShareSource = Field(default=ShareSource.auto_default)
+#--------------------------------
+# Account Schemas
+#--------------------------------
+class AccountBase(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    type: AccountType
+    currency: str = Field(min_length=3, max_length=3)
+    opening_balance: float = Field(ge=0.0)
+    billing_day: Optional[int] = None
+    due_day: Optional[int] = None
 
-class TransactionShareCreate(TransactionShareBase):
-    pass
+class AccountCreate(AccountBase):
+    user_id: int
 
-class TransactionShareUpdate(BaseModel):
-    person_id: Optional[int] = None
-    amount_share: Optional[float] = None
-    source: Optional[ShareSource] = None
+class AccountUpdate(BaseModel):
+    name: Optional[str] = Field(min_length=1, max_length=100)
+    currency: Optional[str] = Field(min_length=3, max_length=3)
+    opening_balance: Optional[float] = Field(ge=0.0)
+    billing_day: Optional[int] = None
+    due_day: Optional[int] = None
 
-class TransactionShareOut(TransactionShareBase):
+class AccountOut(AccountBase):
     id: int
     model_config = ConfigDict(from_attributes=True)
 
-# Transaction Schemas
-class TransactionBase(BaseModel):
-    date: dt.date
-    amount_total: float = Field(gt=0.0, description="Must be greater than 0")
-    currency: str
-    type: TransactionType
-    description: Optional[str] = None
+#--------------------------------
+# Posting Schemas
+#--------------------------------
+class TxPostingBase(BaseModel):
+    amount_oc: float = Field()
+    currency: str = Field(min_length=3, max_length=3)
+    fx_rate: Optional[float] = None
+    amount_hc: float = Field()
+
+class TxPostingCreate(TxPostingBase):
+    transaction_id: int
     account_id: int
-    category_id: int
-    payer_person_id: Optional[int] = None
 
-class TransactionCreate(TransactionBase):
-    shares: Optional[List[TransactionShareCreate]] = None
+class TxPostingCreateAutomatic(BaseModel):
+    account_id: int
+    amount_oc: Optional[float] = Field(default=None)
+    currency: Optional[str] = Field(min_length=3, max_length=3, default=None)
+    fx_rate: Optional[float] = None
+    amount_hc: Optional[float] = Field(default=None)
+    
+class TxPostingUpdate(BaseModel):
+    amount_oc: Optional[float] = Field(default=None)
+    currency: Optional[str] = Field(min_length=3, max_length=3)
+    fx_rate: Optional[float] = None
+    amount_hc: Optional[float] = Field(default=None)
 
-class TransactionUpdate(BaseModel):
-    date: Optional[dt.date] = None
-    amount_total: Optional[float] = None
-    currency: Optional[str] = None
-    type: Optional[TransactionType] = None
-    description: Optional[str] = None
-    account_id: Optional[int] = None
-    category_id: Optional[int] = None
-    payer_person_id: Optional[int] = None
-
-class TransactionOut(TransactionBase):
+class TxPostingOut(TxPostingBase):
     id: int
-    shares: List[TransactionShareOut] = []
     model_config = ConfigDict(from_attributes=True)
 
+#--------------------------------
+# TxSplit Schemas
+#--------------------------------
+class TxSplitBase(BaseModel):
+    share_amount: float = Field(ge=0.0)
+
+class TxSplitCreate(TxSplitBase):
+    transaction_id: int
+    person_id: int
+
+class TxSplitUpdate(BaseModel):
+    share_amount: Optional[float] = Field(ge=0.0)
+
+class TxSplitOut(TxSplitBase):
+    id: int
+    model_config = ConfigDict(from_attributes=True)
+
+#--------------------------------
+# Tx Schemas
+#--------------------------------
+class TxBase(BaseModel):
+    date: datetime
+    type: TxType
+    description: Optional[str] = None
+    amount_hc: float = Field(gt=0.0)
+    source: TxSource
+    postings: list[TxPostingCreateAutomatic] = []
+    splits: list[TxSplitCreate] = []
+
+class TxCreate(TxBase):
+    user_id: int
+
+class TxUpdate(BaseModel):
+    date: Optional[datetime] = None
+    type: Optional[TxType] = None
+    description: Optional[str] = None
+    postings: Optional[list[TxPostingUpdate]] = None
+    splits: Optional[list[TxSplitUpdate]] = None
+
+class TxOut(TxBase):
+    id: int
+    model_config = ConfigDict(from_attributes=True)
+
+#--------------------------------
+# Budget Schemas
+#--------------------------------
+class BudgetBase(BaseModel):
+    name: str
+    year: int
+
+class BudgetLineCreate(BaseModel):
+    month: int
+    account_id: int
+    amount_oc: float
+    currency: str
+    amount_hc: float
+    fx_rate: Optional[float] = None
+    description: Optional[str] = None
+
+class BudgetCreate(BudgetBase):
+    user_id: int
+    lines: list[BudgetLineCreate]
+
+class BudgetUpdate(BaseModel):
+    name: Optional[str] = None
+    lines: Optional[list[BudgetLineCreate]] = None
+
+class BudgetLineOut(BudgetLineCreate):
+    id: int
+    model_config = ConfigDict(from_attributes=True)
+
+class BudgetOut(BudgetBase):
+    id: int
+    lines: list[BudgetLineOut] = []
+    model_config = ConfigDict(from_attributes=True)
+
+#--------------------------------
 # Report Schemas
+#--------------------------------
+class ReportBudgetProgress(BaseModel):
+    account_id: int
+    account_name: str
+    budget_oc: float
+    actual_oc: float
+    progress: float
+
 class ReportBalance(BaseModel):
     account_id: int
     account_name: str
     balance: float
+    currency: str
 
 class ReportDebt(BaseModel):
     person_id: int
@@ -112,33 +195,3 @@ class ReportDebt(BaseModel):
     debt: float
     # If debt is 0, the person is not active
     is_active: bool
-
-# Budget Schemas
-class BudgetBase(BaseModel):
-    name: str
-    year: int
-    month: int
-    category_id: int
-    amount: float
-
-class BudgetCreate(BudgetBase):
-    pass
-
-class BudgetUpdate(BaseModel):
-    name: Optional[str] = None
-    year: Optional[int] = None
-    month: Optional[int] = None
-    category_id: Optional[int] = None
-    amount: Optional[float] = None
-
-class BudgetOut(BudgetBase):
-    id: int
-    model_config = ConfigDict(from_attributes=True)
-
-# Report Schemas
-class ReportBudgetProgress(BaseModel):
-    category_id: int
-    category_name: str
-    budget: float
-    actual: float
-

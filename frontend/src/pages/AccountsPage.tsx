@@ -10,6 +10,7 @@ export default function AccountsPage() {
         currency: "",
         opening_balance: 0,
     });
+    const [editingAccount, setEditingAccount] = useState<Account | null>(null);
 
     useEffect(() => {
         getAccounts().then((response) => setAccounts(response))
@@ -30,11 +31,45 @@ export default function AccountsPage() {
         }
     };
 
+    const handleEditRow = (row: Account) => {
+        setEditingAccount(row);
+    };
+
+    const handleSaveRow = async (updatedAccount: Account) => {
+        await updateAccount(updatedAccount.id, updatedAccount);
+        setEditingAccount(null);
+        getAccounts().then((response) => setAccounts(response));
+    };
+
+    const handleCancelEdit = (row: Account) => {
+        setEditingAccount(null);
+    };
+
     const columns: Column<Account>[] = [
         { label: "ID", accessor: "id" },
-        { label: "Name", accessor: "name" },
-        { label: "Currency", accessor: "currency" },
-        { label: "Opening Balance", accessor: "opening_balance" },
+        { 
+            label: "Name", 
+            accessor: "name", 
+            editable: true, 
+            type: "text" 
+        },
+        { 
+            label: "Currency", 
+            accessor: "currency", 
+            editable: true, 
+            type: "select",
+            options: [
+                { value: "EUR", label: "EUR" },
+                { value: "USD", label: "USD" },
+                { value: "PEN", label: "PEN" }
+            ]
+        },
+        { 
+            label: "Opening Balance", 
+            accessor: "opening_balance", 
+            editable: true, 
+            type: "number" 
+        },
     ];
 
     return (
@@ -90,6 +125,10 @@ export default function AccountsPage() {
           <Table<Account>
             columns={columns}
             data={accounts}
+            onEdit={handleEditRow}
+            onSave={handleSaveRow}
+            onCancel={handleCancelEdit}
+            editingRow={editingAccount}
             onDelete={handleDeleteRow}
           />
         </div>

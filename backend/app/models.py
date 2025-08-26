@@ -1,103 +1,208 @@
-from sqlalchemy import Column, Integer, String, Boolean, Enum, Date, Float, ForeignKey, Text, UniqueConstraint, Index, CheckConstraint
-from sqlalchemy.orm import relationship
+from sqlalchemy import Integer, String, Boolean, Enum, Date, Float, ForeignKey, Text, UniqueConstraint, Index, CheckConstraint, DateTime, func
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 from .database import Base
-import enum
+from typing import List, Optional
+from datetime import datetime
 
+#--------------------------------
 # Enums
-
-class TransactionType(str, enum.Enum):
+#--------------------------------
+class AccountType(Enum):
+    asset = "asset"
+    liability = "liability"
+    equity = "equity"
     income = "income"
     expense = "expense"
 
-class ShareSource(str, enum.Enum):
-    # Expense attributable to me by default
-    auto_default = "auto_default"
-    # Expense attributed manually
-    user_manual = "user_manual"
-    # Expense attributable by debt income
-    auto_debt_income = "auto_debt_income"
+class TxSource(Enum):
+    manual = "manual"
+    batch_import = "batch_import"
+    rule_based = "rule_based"
 
-# Models
+class TxType(Enum):
+    income = "income"
+    expense = "expense"
+    transfer = "transfer"
+    credit_card_payment = "credit_card_payment"
+    forex = "forex"
 
-class Account(Base):
-    __tablename__ = "accounts"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False, unique=True)
-    currency = Column(String(3), nullable=False, default="EUR")
-    opening_balance = Column(Float, nullable=False, default=0.0)
-    # If an account is deleted, all transactions associated with it are deleted
-    transactions = relationship("Transaction", back_populates="account", cascade="all, delete-orphan")
+class softDelete:
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-class Category(Base):
-    __tablename__ = "categories"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False, unique=True)
-    type = Column(Enum(TransactionType), nullable=False)
-    # If a category is deleted, all transactions associated with it are deleted 
-    transactions = relationship("Transaction", back_populates="category", cascade="all, delete-orphan")
-    budgets = relationship("Budget", back_populates="category", cascade="all, delete-orphan")
+#--------------------------------
+# Users
+#--------------------------------
+class User(Base, softDelete):
+    __tablename__ = "users"
 
-class Person(Base):
+    # Columns
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=True, unique=True)
+    home_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=func.now())
+
+    # Relationships
+    people: Mapped[List["Person"]] = relationship(back_populates="user")
+    accounts: Mapped[List["Account"]] = relationship(back_populates="user")
+    txs: Mapped[List["Transaction"]] = relationship(back_populates="user")
+    budgets: Mapped[List["Budget"]] = relationship(back_populates="user")
+
+#--------------------------------
+# People
+#--------------------------------
+class Person(Base, softDelete):
     __tablename__ = "people"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False, unique=True)
-    is_me = Column(Boolean, nullable=False, default=False)
-    # If a person is deleted, all transactions associated with them are deleted
-    transactions_paid = relationship("Transaction", back_populates="payer", foreign_keys="Transaction.payer_person_id", cascade="all, delete-orphan")
-    # If a person is deleted, all shares associated with them are deleted
-    shares = relationship("TransactionShare", back_populates="person", cascade="all, delete-orphan")
-    # Ensure that there is exactly 1 "me"
-    __table_args__ = (Index("uq_one_me", "is_me", unique=True, sqlite_where=Text("is_me = 1")),)
 
-class Transaction(Base):
-    __tablename__ = "transactions"
-    id = Column(Integer, primary_key=True, index=True)
-    date = Column(Date, nullable=False)
-    amount_total = Column(Float, nullable=False)
-    currency = Column(String(3), nullable=False, default="EUR")
-    type = Column(Enum(TransactionType), nullable=False)
-    description = Column(Text, nullable=True)
-    # Can't delete an account if it has transactions associated with it
-    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="RESTRICT"))
-    account = relationship("Account", back_populates="transactions")
-    # Can't delete a category if it has transactions associated with it
-    category_id = Column(Integer, ForeignKey("categories.id", ondelete="RESTRICT"))
-    category = relationship("Category", back_populates="transactions")
-    # Can't delete a person if he has transactions associated with him
-    payer_person_id = Column(Integer, ForeignKey("people.id", ondelete="RESTRICT"))
-    payer = relationship("Person", back_populates="transactions_paid")
-
-    # If a transaction is deleted, all shares associated with it are deleted
-    shares = relationship("TransactionShare", back_populates="transaction", cascade="all, delete-orphan")
-
-    __table_args__ = (
-        Index('idx_tx_date_type', 'date', 'type'),
-        CheckConstraint('amount_total > 0', name='ck_tx_amount_total_positive'),
-    )
-
-class TransactionShare(Base):
-    __tablename__ = "transaction_shares"
-    id = Column(Integer, primary_key=True, index=True)
-    # If a transaction is deleted, all shares associated with it are deleted
-    transaction_id = Column(Integer, ForeignKey("transactions.id", ondelete="CASCADE"), nullable=False, index=True)
-    transaction = relationship("Transaction", back_populates="shares")
-    # A person can't be deleted if he has shares associated with him
-    person_id = Column(Integer, ForeignKey("people.id", ondelete="RESTRICT"), nullable=False, index=True)
-    person = relationship("Person", back_populates="shares")
-    amount_share = Column(Float, nullable=False)
-    source = Column(Enum(ShareSource), nullable=False, default=ShareSource.auto_default)
+    # Columns
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    is_me: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     
+    # Foreign keys
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    # Relationships
+    user: Mapped["User"] = relationship(back_populates="people")
+    splits: Mapped[List["TxSplit"]] = relationship(back_populates="person")
+
+    # Constraints
     __table_args__ = (
-        UniqueConstraint("transaction_id", "person_id", name="uq_share_tx_person"),
-        CheckConstraint("amount_share >= 0", name="ck_share_amount_non_negative"),
+        UniqueConstraint("user_id", "name", name="uq_person_user_name"),
+        Index("uq_one_me_per_user", "user_id", unique=True, sqlite_where=Text("is_me = 1")),
     )
 
+#--------------------------------
+# Accounts
+#--------------------------------
+class Account(Base, softDelete):
+    __tablename__ = "accounts"
+
+    # Columns
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    type: Mapped[AccountType] = mapped_column(Enum(AccountType), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+    opening_balance: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+    # Foreign keys
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    # Relationships
+    user: Mapped["User"] = relationship(back_populates="accounts")
+    postings: Mapped[List["TxPosting"]] = relationship(back_populates="account")
+    budgets: Mapped[List["Budget"]] = relationship(back_populates="account")
+
+    # Fields for credit cards
+    billing_day: Mapped[int] = mapped_column(Integer, nullable=True)
+    due_day: Mapped[int] = mapped_column(Integer, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_account_user_name"),
+    )
+
+#--------------------------------
+# Transactions
+#--------------------------------
+class Transaction(Base, softDelete):
+    __tablename__ = "transactions"
+
+    # Columns
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    date: Mapped[datetime] = mapped_column(Date, nullable=False, default=func.now())
+    type: Mapped[TxType] = mapped_column(Enum(TxType), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(String(255))
+    amount_hc: Mapped[float] = mapped_column(Float, nullable=False)
+    source: Mapped[TxSource] = mapped_column(Enum(TxSource), nullable=False, default=TxSource.manual)
+
+    # Foreign keys
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    # Relationships
+    user: Mapped["User"] = relationship(back_populates="transactions")
+    postings: Mapped[List["TxPosting"]] = relationship(back_populates="transaction")
+    splits: Mapped[List["TxSplit"]] = relationship(back_populates="transaction")
+
+    # Constraints
+    __table_args__ = (
+        Index("idx_tx_user_id", "user_id"),
+        CheckConstraint("amount_hc > 0", name="ck_tx_amount_positive"),
+    )
+
+#--------------------------------
+# Postings
+#--------------------------------
+class TxPosting(Base):
+    __tablename__ = "tx_postings"
+
+    # Columns
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    amount_oc: Mapped[float] = mapped_column(Float, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    fx_rate: Mapped[Optional[float]] = mapped_column(Float)
+    amount_hc: Mapped[float] = mapped_column(Float, nullable=False)
+
+    # Foreign keys
+    tx_id: Mapped[int] = mapped_column(ForeignKey("transactions.id"), nullable=False) 
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
+
+    # Relationships
+    tx: Mapped["Transaction"] = relationship(back_populates="postings")
+    account: Mapped["Account"] = relationship(back_populates="postings")
+
+#--------------------------------
+# TransactionSplit
+#--------------------------------
+class TxSplit(Base):
+    __tablename__ = "tx_splits"
+
+    # Columns
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    share_amount: Mapped[float] = mapped_column(Float, nullable=False)
+
+    # Foreign keys
+    tx_id: Mapped[int] = mapped_column(ForeignKey("transactions.id"), nullable=False)
+    person_id: Mapped[int] = mapped_column(ForeignKey("people.id"), nullable=False)
+
+    # Relationships
+    tx: Mapped["Transaction"] = relationship(back_populates="splits")
+    person: Mapped["Person"] = relationship(back_populates="splits")
+
+    # Constraints
+    __table_args__ = (
+        Index("idx_tx_split_person", "person_id"),
+        CheckConstraint("share_amount > 0", name="ck_tx_split_amount_positive"),
+    )
+
+#--------------------------------
+# Budgets
+#--------------------------------
 class Budget(Base):
     __tablename__ = "budgets"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(20), nullable=False)
-    year = Column(Integer, nullable=False)
-    month = Column(Integer, nullable=False)
-    category_id = Column(Integer, ForeignKey("categories.id", ondelete="RESTRICT"), nullable=False)
-    category = relationship("Category", back_populates="budgets")
-    amount = Column(Float, nullable=False)
+
+    # Columns
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(20), nullable=False)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    month: Mapped[int] = mapped_column(Integer, nullable=False)
+    amount_oc: Mapped[float] = mapped_column(Float, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    amount_hc: Mapped[float] = mapped_column(Float, nullable=False)	
+    fx_rate: Mapped[Optional[float]] = mapped_column(Float)
+    description: Mapped[Optional[str]] = mapped_column(String(100))
+
+    # Foreign keys
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
+
+    # Relationships
+    user: Mapped["User"] = relationship(back_populates="budgets")
+    account: Mapped["Account"] = relationship(back_populates="budgets")
+
+    # Constraints
+    __table_args__ = (
+        Index("idx_budget_user_id", "user_id"),
+        CheckConstraint("amount > 0", name="ck_budget_amount_positive"),
+        UniqueConstraint("user_id", "account_id", "year", "month", name="uq_budget_user_account_year_month"),
+    )

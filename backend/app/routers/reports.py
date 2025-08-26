@@ -19,3 +19,8 @@ def get_debts(db: Session = Depends(get_db)):
 @router.get("/budget-progress/{month}", response_model=list[schemas.ReportBudgetProgress])
 def get_budget_progress(month: str, db: Session = Depends(get_db)):
     return crud.get_budget_progress(db, month)
+
+# Get monthly budget progress for a specific budget
+@router.get("/budget-progress/{budget_id}/{year}/{month}", response_model=schemas.ReportBudgetProgress)
+def get_monthly_budget_progress(budget_id: int, year: int, month: int, db: Session = Depends(get_db)):
+    return crud.get_monthly_budget_progress(db, budget_id, year, month)

@@ -9,6 +9,7 @@ export default function CategoriesPage() {
         name: "",
         type: "expense",
     });
+    const [editingCategory, setEditingCategory] = useState<Category | null>(null);
 
     useEffect(() => {
         getCategories().then((response) => setCategories(response))
@@ -27,11 +28,39 @@ export default function CategoriesPage() {
             getCategories().then((response) => setCategories(response))
         }
     }
-    
+
+    const handleEditRow = (row: Category) => {
+        setEditingCategory(row);
+    };
+
+    const handleSaveRow = async (updatedCategory: Category) => {
+        await updateCategory(updatedCategory.id, updatedCategory);
+        setEditingCategory(null);
+        getCategories().then((response) => setCategories(response));
+    };
+
+    const handleCancelEdit = (row: Category) => {
+        setEditingCategory(null);
+    };
+
     const columns: Column<Category>[] = [
         { label: "ID", accessor: "id" },
-        { label: "Name", accessor: "name" },
-        { label: "Type", accessor: "type" },
+        { 
+            label: "Name", 
+            accessor: "name",
+            editable: true,
+            type: "text"
+        },
+        { 
+            label: "Type", 
+            accessor: "type",
+            editable: true,
+            type: "select",
+            options: [
+                { value: "income", label: "Income" },
+                { value: "expense", label: "Expense" }
+            ]
+        },
     ];
 
     return (
@@ -64,7 +93,7 @@ export default function CategoriesPage() {
                 </button>
             </form>
 
-            <Table<Category> columns={columns} data={categories} onDelete={handleDeleteRow} />
-    </div>
+            <Table<Category> columns={columns} data={categories} onDelete={handleDeleteRow} onEdit={handleEditRow} onSave={handleSaveRow} onCancel={handleCancelEdit} editingRow={editingCategory} />
+        </div>
     )
 }
