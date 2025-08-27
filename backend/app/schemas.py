@@ -85,19 +85,21 @@ class TxPostingCreate(TxPostingBase):
 
 class TxPostingCreateAutomatic(BaseModel):
     account_id: int
-    amount_oc: Optional[float] = Field(default=None)
-    currency: Optional[str] = Field(min_length=3, max_length=3, default=None)
+    amount_oc: Optional[float] = None
+    currency: Optional[str] = None
     fx_rate: Optional[float] = None
-    amount_hc: Optional[float] = Field(default=None)
+    amount_hc: Optional[float] = None
     
 class TxPostingUpdate(BaseModel):
-    amount_oc: Optional[float] = Field(default=None)
-    currency: Optional[str] = Field(min_length=3, max_length=3)
+    amount_oc: Optional[float] = None
+    currency: Optional[str] = None
     fx_rate: Optional[float] = None
-    amount_hc: Optional[float] = Field(default=None)
+    amount_hc: Optional[float] = None
 
 class TxPostingOut(TxPostingBase):
     id: int
+    transaction_id: int
+    account_id: int
     model_config = ConfigDict(from_attributes=True)
 
 #--------------------------------
@@ -124,23 +126,46 @@ class TxBase(BaseModel):
     date: datetime
     type: TxType
     description: Optional[str] = None
-    amount_hc: float = Field(gt=0.0)
     source: TxSource
-    postings: list[TxPostingCreateAutomatic] = Field(default_factory=list)
-    splits: list[TxSplitCreate] = Field(default_factory=list)
+    amount_oc_primary: float
+    currency_primary: str
+
+    # Account for the first posting - origin account
+    account_id_primary: int
+    # Account for the second posting - destination account
+    account_id_secondary: int
 
 class TxCreate(TxBase):
     user_id: int
+
+class TxCreateForex(TxBase):
+    user_id: int
+    amount_oc_secondary: float
+    currency_secondary: str
 
 class TxUpdate(BaseModel):
     date: Optional[datetime] = None
     type: Optional[TxType] = None
     description: Optional[str] = None
-    postings: Optional[list[TxPostingUpdate]] = None
-    splits: Optional[list[TxSplitUpdate]] = None
+
+    # Editable financial fields
+    amount_oc_primary: Optional[float] = None
+    currency_primary: Optional[str] = None
+    account_id_primary: Optional[int] = None
+    account_id_secondary: Optional[int] = None
+
+    # Editable fx fields
+    amount_oc_secondary: Optional[float] = None
+    currency_secondary: Optional[str] = None
 
 class TxOut(TxBase):
     id: int
+
+    # Derived values from the first posting
+    amount_hc_primary: float
+
+    postings: list[TxPostingOut] = Field(default_factory=list)
+    splits: list[TxSplitOut] = Field(default_factory=list)
     model_config = ConfigDict(from_attributes=True)
 
 #--------------------------------

@@ -117,8 +117,9 @@ class Transaction(Base, softDelete):
     date: Mapped[datetime] = mapped_column(Date, nullable=False, default=func.now())
     type: Mapped[TxType] = mapped_column(Enum(TxType), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    amount_hc: Mapped[float] = mapped_column(Float, nullable=False)
     source: Mapped[TxSource] = mapped_column(Enum(TxSource), nullable=False, default=TxSource.manual)
+    # absolute value of the first posting amount in the home currency of the user
+    amount_hc: Mapped[float] = mapped_column(Float, nullable=True)
 
     # Foreign keys
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
@@ -142,6 +143,7 @@ class TxPosting(Base):
 
     # Columns
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # absolute value of first posting amount in the home currency of the user
     amount_oc: Mapped[float] = mapped_column(Float, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     fx_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

@@ -4,6 +4,8 @@ from fastapi import HTTPException
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from math import isfinite
+from typing import Union
 
 from . import models, schemas
 
@@ -46,11 +48,67 @@ def _validate_unique_account(db: Session, user_id: int, name: str, exclude_id: i
     if q.first():
         raise HTTPException(status_code=409, detail=f"Account with name {name} already exists for user {user_id}")
 
+def _validate_tx_header(tx: Union[schemas.TxCreate, schemas.TxCreateForex]) -> None:
+    """
+    Validate the header of a transaction without DB access.
+    """
+    # ---- helpers (local, tiny) ----
+    def _is_forex_type(t) -> bool:
+        return str(t).lower().endswith("forex")  # works for enums and strings
+
+    def _valid_ccy(ccy: str) -> bool:
+        return isinstance(ccy, str) and len(ccy) == 3 and ccy.isalpha()
+
+    def _pos_number(x) -> bool:
+        return x is not None and isinstance(x, (int, float)) and isfinite(x) and x > 0
+
+    # Validate that accounts are different
+    if tx.account_id_primary == tx.account_id_secondary:
+        raise HTTPException(status_code=400, detail="Origin and destination accounts cannot be the same")
+
+    # Validate that the amount and currency are provided for the primary account
+    if not _pos_number(tx.amount_oc_primary):
+        raise HTTPException(status_code=400, detail="Primary amount must be a positive number")
+    if not _valid_ccy(tx.currency_primary):
+        raise HTTPException(status_code=400, detail="Primary currency must be a 3-letter ISO code (e.g. USD, EUR).")
+
+    # Validate type and schema coherence
+    is_forex_declared = _is_forex_type(tx.type)
+    is_forex_payload = hasattr(tx, "amount_oc_secondary") and hasattr(tx, "currency_secondary")
+    # Validate TxCreateForex schema has type == forex
+    if isinstance(tx, schemas.TxCreateForex) and not is_forex_declared:
+        raise HTTPException(status_code=400, detail="TxCreateForex schema must declare as type 'forex'")
+
+    # Validate TxCreate schema has type != forex
+    if isinstance(tx, schemas.TxCreate) and is_forex_declared:
+        raise HTTPException(status_code=400, detail="TxCreate schema cannot declare as type 'forex'")
+
+    # Forex transaction validations
+    if is_forex_declared:
+        # Must provide secondary leg explicitly
+        if not is_forex_payload:
+            raise HTTPException(status_code=400, detail="TxCreateForex schema must provide amount_oc_secondary and currency_secondary")
+        
+        # Validate secondary amount/currency
+        if not _pos_number(tx.amount_oc_secondary):
+            raise HTTPException(status_code=400, detail="Secondary amount must be a positive number")
+        if not _valid_ccy(tx.currency_secondary):
+            raise HTTPException(status_code=400, detail="Secondary currency must be a 3-letter ISO code (e.g. USD, EUR).")
+        
+        # Cureencies must be different in a forex transaction
+        if tx.currency_primary.upper() == tx.currency_secondary.upper():
+            raise HTTPException(status_code=400, detail="Forex transactions require two accounts with different currencies")
+    # Non-forex transaction validations
+    else:
+        # Secondary leg must not be provided
+        if is_forex_payload:
+            raise HTTPException(status_code=400, detail="TxCreate schema cannot provide amount_oc_secondary and currency_secondary")
+
 def _validate_and_complete_postings(db: Session, transaction: models.Transaction, postings: list[schemas.TxPostingCreateAutomatic]) -> list[models.TxPosting]:
     if not postings:
         raise HTTPException(status_code=400, detail="Accounts involved not provided")
 
-    # Get user's home currency
+    # Get user
     user = db.get(models.User, transaction.user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -226,7 +284,7 @@ def _validate_and_complete_postings(db: Session, transaction: models.Transaction
     
     # Validate that postings sum zero
     total_amount = sum(posting.amount_hc for posting in completed_postings)
-    if abs(total_amount) > 0.01:
+    if abs(total_amount) > 0.000001:
         raise HTTPException(status_code=400, detail="The sum of the postings must sum zero")
 
     return completed_postings
@@ -417,6 +475,13 @@ def get_account(db: Session, user_id: int, account_id: int):
 
 def create_account(db: Session, account: schemas.AccountCreate):
     _validate_unique_account(db, account.name, account.user_id)
+
+    # Validate currency based on account type
+    if account.type in [models.AccountType.income, models.AccountType.expense, models.AccountType.equity] and account.currency is not None:
+        raise HTTPException(status_code=400, detail=f"Currency should not be specified for {account.type} accounts")
+    elif account.type in [models.AccountType.asset, models.AccountType.liability] and account.currency is None:
+        raise HTTPException(status_code=400, detail=f"Currency is required for {account.type} accounts")
+    
     db_account = models.Account(
         user_id=account.user_id,
         name=account.name,
@@ -453,10 +518,7 @@ def update_account(db: Session, user_id: int, account_id: int, account: schemas.
         elif new_type in [models.AccountType.asset, models.AccountType.liability]:
             # Ensure currency is set for asset/liability accounts
             if 'currency' not in update_data or update_data['currency'] is None:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Currency is required when changing account type to {new_type}"
-                )
+                raise HTTPException(status_code=400, detail=f"Currency is required when changing account type to {new_type}")
     
     for key, value in update_data.items():
         setattr(db_account, key, value)
@@ -505,25 +567,48 @@ def get_transaction(db: Session, user_id: int, transaction_id: int):
     )
     return query.first()
     
-def create_transaction(db: Session, tx: schemas.TxCreate):
+def create_transaction(db: Session, tx: Union[schemas.TxCreate, schemas.TxCreateForex]):
+    # Header-level validation
+    _validate_tx_header(tx)
+
+    # Create transaction header
     db_tx = models.Transaction(
+        user_id=tx.user_id,
         date=tx.date,
         type=tx.type,
         description=tx.description,
-        amount_hc=tx.amount_hc,
         source=tx.source,
-        user_id=tx.user_id
+        amount_oc_primary=tx.amount_oc_primary,
+        currency_primary=tx.currency_primary.upper(),
+        account_id_primary=tx.account_id_primary,
+        account_id_secondary=tx.account_id_secondary
+
+        # Forex extra fields
+        amount_oc_secondary=getattr(tx, "amount_oc_secondary", None),
+        currency_secondary=getattr(tx, "currency_secondary", None)
     )
     db.add(db_tx)
+    # Flush to get the transaction ID
     db.flush()
 
-    # Validate postings
-    if tx.postings:
-        completed_postings = _validate_and_complete_postings(db, db_tx, tx.postings)
-        db_tx.postings.extend(completed_postings)
-    else:
-        raise HTTPException(status_code=400, detail="Please specify the accounts involved in the transaction")
+    # Build postings from header and validate
+    postings_in = _build_postings_from_tx_input(tx)
+    if not postings_in or len(postings_in) != 2:
+        raise HTTPException(status_code=400, detail="Exactly two postings are required (origin & destination).")
 
+    # Validate and complete postings
+    completed_postings = _validate_and_complete_postings(db, db_tx, postings_in)
+
+    # Attach postings 
+    db_tx.postings.extend(completed_postings)
+
+    # Calculate derived values for tx from first posting
+    amount_hc_primary, amount_oc_primary, currency_primary = _derive_transaction_primary_fields(completed_postings)
+    db_tx.amount_hc_primary = amount_hc_primary
+    db_tx.amount_oc_primary = abs(amount_oc_primary)
+    db_tx.currency_primary = currency_primary
+
+    # Commit transaction
     try:
         db.commit()
     except IntegrityError as e:
