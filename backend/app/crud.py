@@ -4,10 +4,15 @@ from fastapi import HTTPException
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from math import isfinite
-from typing import Union
+from math import isfinite, isclose
+from typing import Union, Dict
 
 from . import models, schemas
+
+#--------------------------------
+# Constants
+#--------------------------------
+BALANCE_ABS_TOL = 0.000001
 
 #--------------------------------
 # Helper functions
@@ -103,19 +108,77 @@ def _validate_tx_header(tx: Union[schemas.TxCreate, schemas.TxCreateForex]) -> N
         # Secondary leg must not be provided
         if is_forex_payload:
             raise HTTPException(status_code=400, detail="TxCreate schema cannot provide amount_oc_secondary and currency_secondary")
+    
+    # Convert currencies to uppercase
+    tx.currency_primary = tx.currency_primary.upper()
+    if is_forex_declared:
+        tx.currency_secondary = tx.currency_secondary.upper()
+
+def _build_postings_from_tx_input(tx: Union[schemas.TxCreate, schemas.TxCreateForex]) -> list[schemas.TxPostingCreateAutomatic]:
+    """
+    Build the two posting *requests* from the transaction header.
+    - For normal transactions: the secondary leg is created with only the account_id.
+      Amount/currency will be mirrored later by _validate_and_complete_postings.
+    - For forex transactions: both legs include explicit amount + currency.
+    """
+    # Primary leg always explicit
+    primary = schemas.TxPostingCreateAutomatic(
+        account_id=tx.account_id_primary,
+        amount_oc=tx.amount_oc_primary,
+        currency=tx.currency_primary,
+        fx_rate=None,
+        amount_hc=None
+    )
+    
+    # Forex: user provides destination account and amount (second posting)
+    if hasattr(tx, "amount_oc_secondary") and hasattr(tx, "currency_secondary"):
+        secondary = schemas.TxPostingCreateAutomatic(
+            account_id=tx.account_id_secondary,
+            amount_oc=tx.amount_oc_secondary,
+            currency=tx.currency_secondary,
+            fx_rate=None,
+            amount_hc=None
+        )
+    else:
+        secondary = schemas.TxPostingCreateAutomatic(
+            account_id=tx.account_id_secondary,
+            amount_oc=None,
+            currency=None,
+            fx_rate=None,
+            amount_hc=None
+        )
+    
+    return [primary, secondary]
 
 def _validate_and_complete_postings(db: Session, transaction: models.Transaction, postings: list[schemas.TxPostingCreateAutomatic]) -> list[models.TxPosting]:
-    if not postings:
-        raise HTTPException(status_code=400, detail="Accounts involved not provided")
+    """
+    Validates structure & completes postings:
+    - Ensures correct accounts for tx type (income/expense/transfer/cc_payment/forex)
+    - For normal tx: mirrors secondary amount/currency if missing
+    - Determines posting currency (asset/liability = account currency; income/expense = posting currency)
+    - Applies sign via _get_amount_multiplier
+    - Computes fx_rate to user's home currency and amount_hc
+    - Ensures postings balance in home currency
+    Returns ready-to-persist models.TxPosting[]
+    """
+    # ---- helpers (local, tiny) ----
+    def _require(condition: bool, message: str) -> None:
+        if not condition:
+            raise HTTPException(status_code=400, detail=message)
 
-    # Get user
+    # Validate there are exactly two postings
+    if not postings or len(postings) != 2:
+        raise HTTPException(status_code=400, detail="Exactly two postings are required (origin & destination).")
+
+    # Get user and home currency
     user = db.get(models.User, transaction.user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    home_currency = user.home_currency
 
-    # Validate accounts
+    # Validate accounts exist and belong to the user
     account_ids = [posting.account_id for posting in postings]
-    accounts = db.query(models.Account).filter(
+    accounts: list[models.Account] = db.query(models.Account).filter(
         models.Account.id.in_(account_ids),
         models.Account.user_id == transaction.user_id,
         models.Account.active == True
@@ -123,171 +186,146 @@ def _validate_and_complete_postings(db: Session, transaction: models.Transaction
     if len(accounts) != len(account_ids):
         raise HTTPException(status_code=404, detail="One or more specified accounts do not exist or do not belong to the user")
 
-    # Create account lookup
-    account_lookup = {acc.id: acc for acc in accounts}
+    # Create account lookup dict
+    acc_by_id: Dict[int, models.Account] = {acc.id: acc for acc in accounts}
 
     # Validate posting structure based on transaction type
-    if transaction.type == models.TxType.income:
-        if len(postings) != 2:
-            raise HTTPException(
-                status_code=400, 
-                detail="Income transactions require exactly 2 postings: one income account and one asset account"
-            )
-        
-        # Validate account types
-        income_accounts = [p for p in postings if account_lookup[p.account_id].type == models.AccountType.income]
-        asset_accounts = [p for p in postings if account_lookup[p.account_id].type == models.AccountType.asset]
-        
-        if not income_accounts or not asset_accounts:
-            raise HTTPException(
-                status_code=400, 
-                detail="Income transactions require one income account and one asset account"
-            )
-    
-    elif transaction.type == models.TxType.expense:
-        if len(postings) != 2:
-            raise HTTPException(
-                status_code=400, 
-                detail="Expense transactions require exactly 2 postings: one expense account and one asset account"
-            )
-        
-        # Validate account types
-        expense_accounts = [p for p in postings if account_lookup[p.account_id].type == models.AccountType.expense]
-        asset_accounts = [p for p in postings if account_lookup[p.account_id].type == models.AccountType.asset]
-        
-        if not expense_accounts or not asset_accounts:
-            raise HTTPException(
-                status_code=400, 
-                detail="Expense transactions require one expense account and one asset account"
-            )
-    
-    elif transaction.type == models.TxType.transfer:
-        if len(postings) != 2:
-            raise HTTPException(
-                status_code=400, 
-                detail="Transfer transactions require exactly 2 postings: two asset accounts"
-            )
-        
-        # Validate account types
-        asset_accounts = [p for p in postings if account_lookup[p.account_id].type == models.AccountType.asset]
-        
-        if len(asset_accounts) != 2:
-            raise HTTPException(
-                status_code=400, 
-                detail="Transfer transactions require two asset accounts"
-            )
+    account1, account2 = acc_by_id[postings[0].account_id], acc_by_id[postings[1].account_id]
+    type1, type2 = account1.type, account2.type
+    # If the account is asset or liability, it must have the same currency as the transaction currency (TODO)
+    tx_type = transaction.type
 
-        # Validate same currency for both accounts
-        if postings[0].currency != postings[1].currency:
-            raise HTTPException(
-                status_code=400, 
-                detail="Transfer transactions require two accounts with the same currency"
-            )
+    # Income transactions
+    if tx_type == models.TxType.income:
+        # Origin account must be asset, destination account must be income
+        _require(type1 == models.AccountType.asset and type2 == models.AccountType.income, "Income transactions require one asset account as origin account and one income account as destination account")
+        # Don't validate currencies as both legs share original currency
     
-    elif transaction.type == models.TxType.credit_card_payment:
-        if len(postings) != 2:
-            raise HTTPException(
-                status_code=400, 
-                detail="Credit card payment transactions require exactly 2 postings: one liability account and one asset account"
-            )
-        
-        # Validate account types
-        liability_accounts = [p for p in postings if account_lookup[p.account_id].type == models.AccountType.liability]
-        asset_accounts = [p for p in postings if account_lookup[p.account_id].type == models.AccountType.asset]
-        
-        if not liability_accounts or not asset_accounts:
-            raise HTTPException(
-                status_code=400, 
-                detail="Credit card payment transactions require one liability account and one asset account"
-            )
-
-        # Validate same currency for both accounts
-        if postings[0].currency != postings[1].currency:
-            raise HTTPException(
-                status_code=400, 
-                detail="Credit card payment transactions require two accounts with the same currency"
-            )
-
-    elif transaction.type == models.TxType.forex:
-        if len(postings) != 2:
-            raise HTTPException(
-                status_code=400, 
-                detail="Forex transactions require exactly 2 postings: two asset accounts"
-            )
-        
-        # Validate account types
-        asset_accounts = [p for p in postings if account_lookup[p.account_id].type == models.AccountType.asset]
-        
-        if len(asset_accounts) != 2:
-            raise HTTPException(
-                status_code=400, 
-                detail="Forex transactions require two asset accounts"
-            )
-
-        # Validate different currencies for both accounts
-        if postings[0].currency == postings[1].currency:
-            raise HTTPException(
-                status_code=400, 
-                detail="Forex transactions require two accounts with different currencies"
-            )
+    # Expense transactions
+    elif tx_type == models.TxType.expense:
+        # Origin account must be asset, destination account must be expense
+        _require(type1 == models.AccountType.asset and type2 == models.AccountType.expense, "Expense transactions require one asset account as origin account and one expense account as destination account")
+        # Don't validate currencies as both legs share original currency
     
+    # Transfer transactions
+    elif tx_type == models.TxType.transfer:
+        # Both accounts must be asset accounts
+        _require(type1 == models.AccountType.asset and type2 == models.AccountType.asset, "Transfer transactions require two asset accounts")
+        # Both accounts must have the same currency
+        _require(account1.currency.upper() == account2.currency.upper(), "Transfer transactions require two accounts with the same currency")
+
+    # Credit card payment transactions
+    elif tx_type == models.TxType.credit_card_payment:
+        # Origin account must be asset, destination account must be liability
+        _require(type1 == models.AccountType.asset and type2 == models.AccountType.liability, "Credit card payment transactions require one asset as origin account and one liability account as destination account")
+        # Same currency for both legs
+        _require(account1.currency.upper() == account2.currency.upper(), "Credit card payment transactions require two accounts with the same currency")
+
+    # Forex transactions
+    elif tx_type == models.TxType.forex:
+        # Both accounts must be asset accounts
+        _require(type1 == models.AccountType.asset and type2 == models.AccountType.asset, "Forex transactions require two asset accounts")
+        # Both accounts must have different currencies
+        _require(account1.currency.upper() != account2.currency.upper(), "Forex transactions require two accounts with different currencies")
+
     else:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Unsupported transaction type: {transaction.type}"
-        )
-    
-    # Complete posting details
-    completed_postings = []
-    for i, posting in enumerate(postings):
-        account = account_lookup[posting.account_id]
+        # All other transaction types are not supported
+        raise HTTPException(status_code=400, detail=f"Unsupported transaction type: {tx_type}")
 
-        # Get the sign of the posting based on the transaction type and account type
-        sign = _get_amount_multiplier(transaction.type, account.type, i)
+    # Fill missing secondary leg info for NORMAL tx (not forex)
+    is_forex = (tx_type == models.TxType.forex)
+    if not is_forex:
+        # Mirror amount_oc from primary leg to secondary leg
+        postings[1].amount_oc = postings[0].amount_oc
+        # Mirror currency from primary leg to secondary leg
+        postings[1].currency = postings[0].currency
 
-        # Determine currency based on account type
+    # Build completed postings with signs, currencies, fx_rate and amount_hc
+    completed_postings: list[models.TxPosting] = []
+
+    for idx, posting in enumerate(postings):
+        account = acc_by_id[posting.account_id]
+        sign = _get_amount_multiplier(tx_type, account.type, idx)
+
+        # Validate for asset and liability accounts that the posting currency matches the account currency
         if account.type in [models.AccountType.asset, models.AccountType.liability]:
-            # For asset and liability accounts, use the account's currency
-            currency = account.currency
-            if posting.currency and posting.currency != currency:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Posting currency '{posting.currency}' does not match account currency '{currency}' for account '{account.name}'"
-                )
+            if posting.currency != account.currency:
+                raise HTTPException(status_code=400, detail=f"Posting currency '{posting.currency}' does not match account currency '{account.currency}' for account '{account.name}'")
+
+        # Determine the amount signed in original currency
+        amount_oc_signed = float(posting.amount_oc) * float(sign)
+
+        # FX to home currency and amount in home currency
+        if posting.currency != home_currency:
+            fx_rate = 1.0
         else:
-            # For income and expense accounts, use the posting's currency
-            currency = posting.currency
-            if not currency:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Currency must be specified for {account.type} account '{account.name}'"
-                )
+            fx_rate = _get_fx_rate(db=db, from_currency=posting.currency, to_currency=home_currency, date=transaction.date)
+        
+        amount_hc = amount_oc_signed * fx_rate
 
-        # Calculate fx_rate for forex transactions
-        fx_rate = 1.0
-        if transaction.type == models.TxType.forex and i == 1:
-            #Calculate fx_rate based on the two amounts provided
-            amount1 = postings[0].amount_oc
-            amount2 = posting.amount_oc
-            if amount1 != 0:
-                fx_rate = abs(amount2 / amount1)
-
-        completed_posting = models.TxPosting(
+        # Create the posting
+        completed_postings.append(models.TxPosting(
             transaction_id=transaction.id,
-            account_id=posting.account_id,
-            amount_oc=posting.amount_oc * sign,
-            currency=currency,
+            account_id=account.id,
+            amount_oc=amount_oc_signed,
+            currency=posting.currency,
             fx_rate=fx_rate,
-            amount_hc=posting.amount_oc * sign * fx_rate
-        )
-        completed_postings.append(completed_posting)
+            amount_hc=amount_hc
+        ))
     
-    # Validate that postings sum zero
-    total_amount = sum(posting.amount_hc for posting in completed_postings)
-    if abs(total_amount) > 0.000001:
-        raise HTTPException(status_code=400, detail="The sum of the postings must sum zero")
-
+    # Balance check in home currency
+    total_hc = sum(p.amount_hc for p in completed_postings)
+    if not isclose(total_hc, 0.0, rel_tol=0.0, abs_tol=BALANCE_ABS_TOL):
+        raise HTTPException(status_code=400, detail="Postings must balance to zero in home currency")
+    
     return completed_postings
+
+def _derive_transaction_primary_fields(db: Session, transaction: models.Transaction, completed_postings: list[models.TxPosting]) -> tuple[float, float, str]:
+    """
+    Derive the primary fields of a transaction from the first posting.
+    """
+    if not completed_postings or len(completed_postings) < 1:
+        raise HTTPException(status_code=400, detail="No postings provided")
+
+    # Load user's home currency
+    user = db.get(models.User, transaction.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    home_currency = user.home_currency
+
+    origin = completed_postings[0]
+    origin_currency = origin.currency.upper()
+    if origin_currency == home_currency:
+        fx_rate = 1.0
+    else:
+        if origin.fx_rate and origin.fx_rate > 0:
+            fx_rate = origin.fx_rate
+        else:
+            fx_rate = _get_fx_rate(db=db, from_currency=origin_currency, to_currency=home_currency, date=transaction.date)
+
+    amount_oc_primary = abs(float(origin.amount_oc))
+    if origin.amount_hc not in (None, 0):
+        amount_hc_primary = abs(float(origin.amount_hc))
+    else:
+        amount_hc_primary = abs(float(amount_oc_primary) * float(fx_rate))
+    currency_primary = origin_currency
+
+    return amount_hc_primary, amount_oc_primary, currency_primary
+
+def _get_fx_rate(db: Session, from_currency: str, to_currency: str, date: date) -> float:
+    """
+    Get the FX rate for a given date and currencies.
+    """
+    # Get the FX rate for the given date and currencies
+    fx_rate = db.query(models.FxRate).filter(
+        models.FxRate.from_currency == from_currency,
+        models.FxRate.to_currency == to_currency,
+        models.FxRate.year == date.year,
+        models.FxRate.month == date.month
+    ).first()
+    if not fx_rate:
+        raise HTTPException(status_code=404, detail=f"FX rate not found for {from_currency} to {to_currency} on {date}")
+    return fx_rate.rate
 
 def _get_amount_multiplier(tx_type: models.TxType, account_type: models.AccountType, posting_index: int) -> float:
     if tx_type == models.TxType.income:
@@ -324,7 +362,6 @@ def _get_amount_multiplier(tx_type: models.TxType, account_type: models.AccountT
     else:
         # Default to first posting debit, second credit
         return 1.0 if posting_index == 0 else -1.0
-
 
 #--------------------------------
 # User
@@ -578,11 +615,13 @@ def create_transaction(db: Session, tx: Union[schemas.TxCreate, schemas.TxCreate
         type=tx.type,
         description=tx.description,
         source=tx.source,
-        amount_oc_primary=tx.amount_oc_primary,
-        currency_primary=tx.currency_primary.upper(),
+        # Primary leg
         account_id_primary=tx.account_id_primary,
-        account_id_secondary=tx.account_id_secondary
-
+        amount_oc_primary=tx.amount_oc_primary,
+        currency_primary=tx.currency_primary,
+        
+        # Secondary leg
+        account_id_secondary=tx.account_id_secondary,
         # Forex extra fields
         amount_oc_secondary=getattr(tx, "amount_oc_secondary", None),
         currency_secondary=getattr(tx, "currency_secondary", None)
@@ -592,12 +631,10 @@ def create_transaction(db: Session, tx: Union[schemas.TxCreate, schemas.TxCreate
     db.flush()
 
     # Build postings from header and validate
-    postings_in = _build_postings_from_tx_input(tx)
-    if not postings_in or len(postings_in) != 2:
-        raise HTTPException(status_code=400, detail="Exactly two postings are required (origin & destination).")
+    postings = _build_postings_from_tx_input(tx)
 
     # Validate and complete postings
-    completed_postings = _validate_and_complete_postings(db, db_tx, postings_in)
+    completed_postings = _validate_and_complete_postings(db, db_tx, postings)
 
     # Attach postings 
     db_tx.postings.extend(completed_postings)
