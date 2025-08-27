@@ -83,7 +83,7 @@ class Account(Base, softDelete):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     type: Mapped[AccountType] = mapped_column(Enum(AccountType), nullable=False)
-    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+    currency: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
     opening_balance: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
     # Foreign keys
@@ -100,6 +100,10 @@ class Account(Base, softDelete):
 
     __table_args__ = (
         UniqueConstraint("user_id", "name", name="uq_account_user_name"),
+        CheckConstraint(
+            "(type IN ('asset', 'liability') AND currency IS NOT NULL) OR (type IN ('income', 'expense', 'equity') AND currency IS NULL)",
+            name="ck_account_currency_required"
+        ),
     )
 
 #--------------------------------
@@ -112,7 +116,7 @@ class Transaction(Base, softDelete):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     date: Mapped[datetime] = mapped_column(Date, nullable=False, default=func.now())
     type: Mapped[TxType] = mapped_column(Enum(TxType), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(String(255))
+    description: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     amount_hc: Mapped[float] = mapped_column(Float, nullable=False)
     source: Mapped[TxSource] = mapped_column(Enum(TxSource), nullable=False, default=TxSource.manual)
 
@@ -140,7 +144,7 @@ class TxPosting(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     amount_oc: Mapped[float] = mapped_column(Float, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
-    fx_rate: Mapped[Optional[float]] = mapped_column(Float)
+    fx_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     amount_hc: Mapped[float] = mapped_column(Float, nullable=False)
 
     # Foreign keys
@@ -189,8 +193,8 @@ class Budget(Base):
     amount_oc: Mapped[float] = mapped_column(Float, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     amount_hc: Mapped[float] = mapped_column(Float, nullable=False)	
-    fx_rate: Mapped[Optional[float]] = mapped_column(Float)
-    description: Mapped[Optional[str]] = mapped_column(String(100))
+    fx_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     # Foreign keys
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)

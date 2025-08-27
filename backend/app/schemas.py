@@ -1,6 +1,8 @@
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional
 from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel, ConfigDict, Field
+
 from .models import AccountType, TxSource, TxType
 
 #--------------------------------
@@ -48,7 +50,7 @@ class PersonOut(PersonBase):
 class AccountBase(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     type: AccountType
-    currency: str = Field(min_length=3, max_length=3)
+    currency: Optional[str] = Field(min_length=3, max_length=3)
     opening_balance: float = Field(ge=0.0)
     billing_day: Optional[int] = None
     due_day: Optional[int] = None
@@ -58,6 +60,7 @@ class AccountCreate(AccountBase):
 
 class AccountUpdate(BaseModel):
     name: Optional[str] = Field(min_length=1, max_length=100)
+    type: Optional[AccountType] = None
     currency: Optional[str] = Field(min_length=3, max_length=3)
     opening_balance: Optional[float] = Field(ge=0.0)
     billing_day: Optional[int] = None

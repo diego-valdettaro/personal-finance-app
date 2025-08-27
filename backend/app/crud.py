@@ -1,9 +1,11 @@
-from sqlalchemy.orm import Session
-from . import models, schemas
+from datetime import date
+
 from fastapi import HTTPException
-from sqlalchemy.exc import IntegrityError
-from datetime import datetime, date
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from . import models, schemas
 
 #--------------------------------
 # Helper functions
@@ -44,27 +46,7 @@ def _validate_unique_account(db: Session, user_id: int, name: str, exclude_id: i
     if q.first():
         raise HTTPException(status_code=409, detail=f"Account with name {name} already exists for user {user_id}")
 
-# Helper function to replace the shares of a transaction
-def _replace_shares(db: Session, db_transaction: models.Transaction, shares: list[schemas.TransactionShareCreate]) -> models.Transaction:
-    # Validate the sum of the shares is equal to the amount_total
-    if sum(share.amount_share for share in shares) != db_transaction.amount_total:
-        raise HTTPException(status_code=400, detail="The sum of the shares must be equal to the amount_total")
-    # Delete all existing shares
-    db.query(models.TransactionShare).filter(models.TransactionShare.transaction_id == db_transaction.id).delete()
-    # Create new shares
-    for share in shares:
-        db_transaction.shares.append(models.TransactionShare(
-            transaction_id=db_transaction.id,
-            person_id=share.person_id,
-            amount_share=share.amount_share,
-            source=share.source
-        ))
-    db.add_all(db_transaction.shares)
-    db.commit()
-    db.refresh(db_transaction)
-    return db_transaction
-
-def _validate_and_complete_postings(db: Session, transaction: models.Transaction, postings: list[schemas.TxPostingCreateAutomatic]):
+def _validate_and_complete_postings(db: Session, transaction: models.Transaction, postings: list[schemas.TxPostingCreateAutomatic]) -> list[models.TxPosting]:
     if not postings:
         raise HTTPException(status_code=400, detail="Accounts involved not provided")
 
@@ -205,6 +187,24 @@ def _validate_and_complete_postings(db: Session, transaction: models.Transaction
         # Get the sign of the posting based on the transaction type and account type
         sign = _get_amount_multiplier(transaction.type, account.type, i)
 
+        # Determine currency based on account type
+        if account.type in [models.AccountType.asset, models.AccountType.liability]:
+            # For asset and liability accounts, use the account's currency
+            currency = account.currency
+            if posting.currency and posting.currency != currency:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Posting currency '{posting.currency}' does not match account currency '{currency}' for account '{account.name}'"
+                )
+        else:
+            # For income and expense accounts, use the posting's currency
+            currency = posting.currency
+            if not currency:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Currency must be specified for {account.type} account '{account.name}'"
+                )
+
         # Calculate fx_rate for forex transactions
         fx_rate = 1.0
         if transaction.type == models.TxType.forex and i == 1:
@@ -218,7 +218,7 @@ def _validate_and_complete_postings(db: Session, transaction: models.Transaction
             transaction_id=transaction.id,
             account_id=posting.account_id,
             amount_oc=posting.amount_oc * sign,
-            currency=posting.currency,
+            currency=currency,
             fx_rate=fx_rate,
             amount_hc=posting.amount_oc * sign * fx_rate
         )
@@ -238,8 +238,7 @@ def _get_amount_multiplier(tx_type: models.TxType, account_type: models.AccountT
         elif account_type == models.AccountType.asset:
             return 1.0
         else:
-            # Default to first posting debit, second credit
-            return 1.0 if posting_index == 0 else -1.0
+            raise HTTPException(status_code=400, detail="Income transactions require one income account and one asset account")
     
     elif tx_type == models.TxType.expense:
         if account_type == models.AccountType.expense:
@@ -247,12 +246,10 @@ def _get_amount_multiplier(tx_type: models.TxType, account_type: models.AccountT
         elif account_type == models.AccountType.asset:
             return -1.0
         else:
-            # Default to first posting debit, second credit
-            return 1.0 if posting_index == 0 else -1.0
+            raise HTTPException(status_code=400, detail="Expense transactions require one expense account and one asset account")
     
     elif tx_type == models.TxType.transfer:
-        # Default to first posting debit, second credit
-        return 1.0 if posting_index == 0 else -1.0
+        raise HTTPException(status_code=400, detail="Transfer transactions require two asset accounts")
     
     elif tx_type == models.TxType.credit_card_payment:
         if account_type == models.AccountType.liability:
@@ -443,8 +440,27 @@ def update_account(db: Session, user_id: int, account_id: int, account: schemas.
     if not db_account:
         raise HTTPException(status_code=404, detail="Account not found")
     _validate_unique_account(db, account.name, user_id, account_id)
-    for key, value in account.model_dump(exclude_unset=True).items():
+    
+    # Handle account type changes and currency requirements
+    update_data = account.model_dump(exclude_unset=True)
+    
+    # If account type is being changed, handle currency appropriately
+    if 'type' in update_data:
+        new_type = update_data['type']
+        if new_type in [models.AccountType.income, models.AccountType.expense, models.AccountType.equity]:
+            # Clear currency for income/expense/equity accounts
+            update_data['currency'] = None
+        elif new_type in [models.AccountType.asset, models.AccountType.liability]:
+            # Ensure currency is set for asset/liability accounts
+            if 'currency' not in update_data or update_data['currency'] is None:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Currency is required when changing account type to {new_type}"
+                )
+    
+    for key, value in update_data.items():
         setattr(db_account, key, value)
+    
     try:
         db.commit()
     except IntegrityError as e:
