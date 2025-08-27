@@ -1,5 +1,7 @@
-from sqlalchemy import Integer, String, Boolean, Enum, Date, Float, ForeignKey, Text, UniqueConstraint, Index, CheckConstraint, DateTime, func
+from sqlalchemy import Integer, String, Boolean, Date, Float, ForeignKey, Text, UniqueConstraint, Index, CheckConstraint, DateTime, func
 from sqlalchemy.orm import relationship, Mapped, mapped_column
+from enum import Enum as PyEnum
+from sqlalchemy.types import Enum as SAEnum
 from .database import Base
 from typing import List, Optional
 from datetime import datetime
@@ -7,33 +9,33 @@ from datetime import datetime
 #--------------------------------
 # Enums
 #--------------------------------
-class AccountType(Enum):
+class AccountType(str, PyEnum):
     asset = "asset"
     liability = "liability"
     equity = "equity"
     income = "income"
     expense = "expense"
 
-class TxSource(Enum):
+class TxSource(str, PyEnum):
     manual = "manual"
     batch_import = "batch_import"
     rule_based = "rule_based"
 
-class TxType(Enum):
+class TxType(str, PyEnum):
     income = "income"
     expense = "expense"
     transfer = "transfer"
     credit_card_payment = "credit_card_payment"
     forex = "forex"
 
-class softDelete:
+class softDeleteMixin:
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 #--------------------------------
 # Users
 #--------------------------------
-class User(Base, softDelete):
+class User(Base, softDeleteMixin):
     __tablename__ = "users"
 
     # Columns
@@ -52,7 +54,7 @@ class User(Base, softDelete):
 #--------------------------------
 # People
 #--------------------------------
-class Person(Base, softDelete):
+class Person(Base, softDeleteMixin):
     __tablename__ = "people"
 
     # Columns
@@ -76,13 +78,13 @@ class Person(Base, softDelete):
 #--------------------------------
 # Accounts
 #--------------------------------
-class Account(Base, softDelete):
+class Account(Base, softDeleteMixin):
     __tablename__ = "accounts"
 
     # Columns
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    type: Mapped[AccountType] = mapped_column(Enum(AccountType), nullable=False)
+    type: Mapped[AccountType] = mapped_column(SAEnum(AccountType, name="account_type", native_enum=False), nullable=False)
     currency: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
     opening_balance: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
@@ -107,17 +109,42 @@ class Account(Base, softDelete):
     )
 
 #--------------------------------
+# FX rates
+#--------------------------------
+class FxRate(Base):
+    __tablename__ = "fx_rates"
+
+    # Columns
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    from_currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    to_currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    rate: Mapped[float] = mapped_column(Float, nullable=False)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    month: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Constraints
+    __table_args__ = (
+        UniqueConstraint("from_currency", "to_currency", "year", "month", name="uq_fx_rates_from_currency_to_currency_year_month"),
+    )
+
+#--------------------------------
 # Transactions
 #--------------------------------
-class Transaction(Base, softDelete):
+class Transaction(Base, softDeleteMixin):
     __tablename__ = "transactions"
 
     # Columns
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     date: Mapped[datetime] = mapped_column(Date, nullable=False, default=func.now())
-    type: Mapped[TxType] = mapped_column(Enum(TxType), nullable=False)
+    type: Mapped[TxType] = mapped_column(SAEnum(TxType, name="tx_type", native_enum=False), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    source: Mapped[TxSource] = mapped_column(Enum(TxSource), nullable=False, default=TxSource.manual)
+    source: Mapped[TxSource] = mapped_column(SAEnum(TxSource, name="tx_source", native_enum=False), nullable=False, default=TxSource.manual)
+    account_id_primary: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
+    account_id_secondary: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
+    amount_oc_primary: Mapped[float] = mapped_column(Float, nullable=False)
+    currency_primary: Mapped[str] = mapped_column(String(3), nullable=False)
+    amount_oc_secondary: Mapped[float] = mapped_column(Float, nullable=True)
+    currency_secondary: Mapped[str] = mapped_column(String(3), nullable=True)
     # absolute value of the first posting amount in the home currency of the user
     amount_hc: Mapped[float] = mapped_column(Float, nullable=True)
 

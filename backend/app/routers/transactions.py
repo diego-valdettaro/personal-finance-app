@@ -7,12 +7,12 @@ from ..database import get_db
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 # Create a transaction
-@router.post("/", response_model=schemas.TransactionOut)
-def create_transaction(transaction: schemas.TransactionCreate, db: Session = Depends(get_db)):
+@router.post("/", response_model=schemas.TxOut)
+def create_transaction(transaction: schemas.TxCreate, db: Session = Depends(get_db)):
     return crud.create_transaction(db, transaction)
 
 # List all transactions
-@router.get("/", response_model=list[schemas.TransactionOut])
+@router.get("/", response_model=list[schemas.TxOut])
 def get_transactions(
     db: Session = Depends(get_db),
     date_from: Optional[str] = Query(default=None),
@@ -24,13 +24,13 @@ def get_transactions(
     return crud.get_transactions(db, date_from=date_from, date_to=date_to, account_id=account_id, category_id=category_id, payer_person_id=payer_person_id)
 
 # Get a transaction
-@router.get("/{tx_id}", response_model=schemas.TransactionOut)
+@router.get("/{tx_id}", response_model=schemas.TxOut)
 def get_transaction(tx_id: int, db: Session = Depends(get_db)):
     return crud.get_transaction(db, tx_id)
 
 # Update a transaction
-@router.patch("/{tx_id}", response_model=schemas.TransactionOut)
-def update_transaction(tx_id: int, transaction: schemas.TransactionUpdate, db: Session = Depends(get_db)):
+@router.patch("/{tx_id}", response_model=schemas.TxOut)
+def update_transaction(tx_id: int, transaction: schemas.TxUpdate, db: Session = Depends(get_db)):
     return crud.update_transaction(db, tx_id, transaction)
 
 # Delete a transaction
@@ -38,8 +38,3 @@ def update_transaction(tx_id: int, transaction: schemas.TransactionUpdate, db: S
 def delete_transaction(tx_id: int, db: Session = Depends(get_db)):
     crud.delete_transaction(db, tx_id)
     return
-
-# Split a transaction
-@router.post("/{tx_id}/split", response_model=schemas.TransactionOut)
-def split_transaction(tx_id: int, payer_person_id: int, shares: list[schemas.TransactionShareCreate], db: Session = Depends(get_db)):
-    return crud.split_transaction(db, tx_id, payer_person_id, shares)

@@ -71,6 +71,26 @@ class AccountOut(AccountBase):
     model_config = ConfigDict(from_attributes=True)
 
 #--------------------------------
+# FX Rate Schemas
+#--------------------------------
+class FxRateBase(BaseModel):
+    from_currency: str = Field(min_length=3, max_length=3)
+    to_currency: str = Field(min_length=3, max_length=3)
+    rate: float = Field(ge=0.0)
+    year: int
+    month: int
+
+class FxRateCreate(FxRateBase):
+    pass
+
+class FxRateUpdate(BaseModel):
+    rate: Optional[float] = Field(ge=0.0)
+
+class FxRateOut(FxRateBase):
+    id: int
+    model_config = ConfigDict(from_attributes=True)
+
+#--------------------------------
 # Posting Schemas
 #--------------------------------
 class TxPostingBase(BaseModel):
@@ -79,18 +99,8 @@ class TxPostingBase(BaseModel):
     fx_rate: Optional[float] = None
     amount_hc: float = Field()
 
-class TxPostingCreate(TxPostingBase):
-    transaction_id: int
-    account_id: int
-
 class TxPostingCreateAutomatic(BaseModel):
     account_id: int
-    amount_oc: Optional[float] = None
-    currency: Optional[str] = None
-    fx_rate: Optional[float] = None
-    amount_hc: Optional[float] = None
-    
-class TxPostingUpdate(BaseModel):
     amount_oc: Optional[float] = None
     currency: Optional[str] = None
     fx_rate: Optional[float] = None
@@ -107,13 +117,6 @@ class TxPostingOut(TxPostingBase):
 #--------------------------------
 class TxSplitBase(BaseModel):
     share_amount: float = Field(ge=0.0)
-
-class TxSplitCreate(TxSplitBase):
-    transaction_id: int
-    person_id: int
-
-class TxSplitUpdate(BaseModel):
-    share_amount: Optional[float] = Field(ge=0.0)
 
 class TxSplitOut(TxSplitBase):
     id: int

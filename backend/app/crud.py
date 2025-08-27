@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import datetime, date
 
 from fastapi import HTTPException
 from sqlalchemy import func
@@ -171,18 +171,14 @@ def _validate_and_complete_postings(db: Session, transaction: models.Transaction
         raise HTTPException(status_code=400, detail="Exactly two postings are required (origin & destination).")
 
     # Get user and home currency
-    user = db.get(models.User, transaction.user_id)
+    user = get_user(db=db, user_id=transaction.user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     home_currency = user.home_currency
 
     # Validate accounts exist and belong to the user
     account_ids = [posting.account_id for posting in postings]
-    accounts: list[models.Account] = db.query(models.Account).filter(
-        models.Account.id.in_(account_ids),
-        models.Account.user_id == transaction.user_id,
-        models.Account.active == True
-    ).all()
+    accounts: list[models.Account] = get_accounts(db=db, user_id=transaction.user_id, account_ids=account_ids)
     if len(accounts) != len(account_ids):
         raise HTTPException(status_code=404, detail="One or more specified accounts do not exist or do not belong to the user")
 
@@ -242,6 +238,7 @@ def _validate_and_complete_postings(db: Session, transaction: models.Transaction
 
     # Build completed postings with signs, currencies, fx_rate and amount_hc
     completed_postings: list[models.TxPosting] = []
+    fx_rates = get_fx_rates_by_date(db=db, year=transaction.date.year, month=transaction.date.month)
 
     for idx, posting in enumerate(postings):
         account = acc_by_id[posting.account_id]
@@ -259,7 +256,7 @@ def _validate_and_complete_postings(db: Session, transaction: models.Transaction
         if posting.currency != home_currency:
             fx_rate = 1.0
         else:
-            fx_rate = _get_fx_rate(db=db, from_currency=posting.currency, to_currency=home_currency, date=transaction.date)
+            fx_rate = fx_rates[posting.currency][home_currency]
         
         amount_hc = amount_oc_signed * fx_rate
 
@@ -288,7 +285,7 @@ def _derive_transaction_primary_fields(db: Session, transaction: models.Transact
         raise HTTPException(status_code=400, detail="No postings provided")
 
     # Load user's home currency
-    user = db.get(models.User, transaction.user_id)
+    user = get_user(db=db, user_id=transaction.user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     home_currency = user.home_currency
@@ -301,7 +298,7 @@ def _derive_transaction_primary_fields(db: Session, transaction: models.Transact
         if origin.fx_rate and origin.fx_rate > 0:
             fx_rate = origin.fx_rate
         else:
-            fx_rate = _get_fx_rate(db=db, from_currency=origin_currency, to_currency=home_currency, date=transaction.date)
+            fx_rate = get_fx_rate(db=db, from_currency=origin_currency, to_currency=home_currency, year=transaction.date.year, month=transaction.date.month)
 
     amount_oc_primary = abs(float(origin.amount_oc))
     if origin.amount_hc not in (None, 0):
@@ -311,21 +308,6 @@ def _derive_transaction_primary_fields(db: Session, transaction: models.Transact
     currency_primary = origin_currency
 
     return amount_hc_primary, amount_oc_primary, currency_primary
-
-def _get_fx_rate(db: Session, from_currency: str, to_currency: str, date: date) -> float:
-    """
-    Get the FX rate for a given date and currencies.
-    """
-    # Get the FX rate for the given date and currencies
-    fx_rate = db.query(models.FxRate).filter(
-        models.FxRate.from_currency == from_currency,
-        models.FxRate.to_currency == to_currency,
-        models.FxRate.year == date.year,
-        models.FxRate.month == date.month
-    ).first()
-    if not fx_rate:
-        raise HTTPException(status_code=404, detail=f"FX rate not found for {from_currency} to {to_currency} on {date}")
-    return fx_rate.rate
 
 def _get_amount_multiplier(tx_type: models.TxType, account_type: models.AccountType, posting_index: int) -> float:
     if tx_type == models.TxType.income:
@@ -366,19 +348,21 @@ def _get_amount_multiplier(tx_type: models.TxType, account_type: models.AccountT
 #--------------------------------
 # User
 #--------------------------------
-def get_users(db: Session):
+def get_users(db: Session, user_ids: list[int] | None = None) -> list[models.User]:
     query = db.query(models.User).filter(models.User.active == True)
+    if user_ids:
+        query = query.filter(models.User.id.in_(user_ids))
     return query.all()
 
-def get_user(db: Session, user_id: int):
+def get_user(db: Session, user_id: int) -> models.User | None:
     query = db.query(models.User).filter(
         models.User.id == user_id,
         models.User.active == True
     )
     return query.first()
 
-def create_user(db: Session, user: schemas.UserCreate):
-    _validate_unique_user(db, user.name, user.email)
+def create_user(db: Session, user: schemas.UserCreate) -> models.User:
+    _validate_unique_user(db=db, name=user.name, email=user.email)
     db_user = models.User(
         name=user.name,
         email=user.email,
@@ -393,11 +377,11 @@ def create_user(db: Session, user: schemas.UserCreate):
     db.refresh(db_user)
     return db_user
 
-def update_user(db: Session, user_id: int, user: schemas.UserUpdate):
+def update_user(db: Session, user_id: int, user: schemas.UserUpdate) -> models.User:
     db_user = get_user(db, user_id)
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
-    _validate_unique_user(db, user.name, user.email, user_id)
+    _validate_unique_user(db=db, name=user.name, email=user.email, exclude_id=user_id)
     for key, value in user.model_dump(exclude_unset=True).items():
         setattr(db_user, key, value)
     try:
@@ -408,20 +392,22 @@ def update_user(db: Session, user_id: int, user: schemas.UserUpdate):
     db.refresh(db_user)
     return db_user
 
-def deactivate_user(db: Session, user_id: int):
+def deactivate_user(db: Session, user_id: int) -> models.User:
     db_user = get_user(db, user_id)
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
     db_user.active = False
+    db_user.deleted_at = datetime.now()
     db.commit()
     db.refresh(db_user)
     return db_user
 
-def activate_user(db: Session, user_id: int):
+def activate_user(db: Session, user_id: int) -> models.User:
     db_user = get_user(db, user_id)
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
     db_user.active = True
+    db_user.deleted_at = None
     db.commit()
     db.refresh(db_user)
     return db_user
@@ -429,14 +415,16 @@ def activate_user(db: Session, user_id: int):
 #--------------------------------
 # People
 #--------------------------------
-def get_people(db: Session, user_id: int):
+def get_people(db: Session, user_id: int, person_ids: list[int] | None = None) -> list[models.Person]:
     query = db.query(models.Person).filter(
         models.Person.user_id == user_id,
         models.Person.active == True
     )
+    if person_ids:
+        query = query.filter(models.Person.id.in_(person_ids))
     return query.all()
 
-def get_person(db: Session, user_id: int, person_id: int):
+def get_person(db: Session, user_id: int, person_id: int) -> models.Person | None:
     query = db.query(models.Person).filter(
         models.Person.user_id == user_id,
         models.Person.id == person_id,
@@ -444,8 +432,8 @@ def get_person(db: Session, user_id: int, person_id: int):
     )
     return query.first()
 
-def create_person(db: Session, person: schemas.PersonCreate):
-    _validate_unique_person(db, person.name, person.is_me, person.user_id)
+def create_person(db: Session, person: schemas.PersonCreate) -> models.Person:
+    _validate_unique_person(db=db, user_id=person.user_id, name=person.name, is_me=person.is_me)
     db_person = models.Person(
         user_id=person.user_id,
         name=person.name,
@@ -460,11 +448,11 @@ def create_person(db: Session, person: schemas.PersonCreate):
     db.refresh(db_person)
     return db_person
 
-def update_person(db: Session, user_id: int, person_id: int, person: schemas.PersonUpdate):
+def update_person(db: Session, user_id: int, person_id: int, person: schemas.PersonUpdate) -> models.Person:
     db_person = get_person(db, user_id, person_id)
     if not db_person:
         raise HTTPException(status_code=404, detail="Person not found")
-    _validate_unique_person(db, person.name, person.is_me, user_id, person_id)
+    _validate_unique_person(db=db, user_id=user_id, name=person.name, is_me=person.is_me, exclude_id=person_id)
     for key, value in person.model_dump(exclude_unset=True).items():
         setattr(db_person, key, value)
     try:
@@ -475,34 +463,38 @@ def update_person(db: Session, user_id: int, person_id: int, person: schemas.Per
     db.refresh(db_person)
     return db_person
 
-def deactivate_person(db: Session, user_id: int, person_id: int):
-    db_person = get_person(db, user_id, person_id)
+def deactivate_person(db: Session, user_id: int, person_id: int) -> models.Person:
+    db_person = get_person(db=db, user_id=user_id, person_id=person_id)
     if not db_person:
         raise HTTPException(status_code=404, detail="Person not found")
     db_person.active = False
+    db_person.deleted_at = datetime.now()
     db.commit()
     db.refresh(db_person)
     return db_person
 
-def activate_person(db: Session, user_id: int, person_id: int):
-    db_person = get_person(db, user_id, person_id)
+def activate_person(db: Session, user_id: int, person_id: int) -> models.Person:
+    db_person = get_person(db=db, user_id=user_id, person_id=person_id)
     if not db_person:
         raise HTTPException(status_code=404, detail="Person not found")
     db_person.active = True
+    db_person.deleted_at = None
     db.commit()
     db.refresh(db_person)
     return db_person
 #--------------------------------
 # Account
 #--------------------------------
-def get_accounts(db: Session, user_id: int):
+def get_accounts(db: Session, user_id: int, account_ids: list[int] | None = None) -> list[models.Account]:
     query = db.query(models.Account).filter(
         models.Account.user_id == user_id,
         models.Account.active == True
     )
+    if account_ids:
+        query = query.filter(models.Account.id.in_(account_ids))
     return query.all()
 
-def get_account(db: Session, user_id: int, account_id: int):
+def get_account(db: Session, user_id: int, account_id: int) -> models.Account | None:
     query = db.query(models.Account).filter(
         models.Account.user_id == user_id,
         models.Account.id == account_id,
@@ -510,8 +502,8 @@ def get_account(db: Session, user_id: int, account_id: int):
     )
     return query.first()
 
-def create_account(db: Session, account: schemas.AccountCreate):
-    _validate_unique_account(db, account.name, account.user_id)
+def create_account(db: Session, account: schemas.AccountCreate) -> models.Account:
+    _validate_unique_account(db=db, user_id=account.user_id, name=account.name)
 
     # Validate currency based on account type
     if account.type in [models.AccountType.income, models.AccountType.expense, models.AccountType.equity] and account.currency is not None:
@@ -537,11 +529,11 @@ def create_account(db: Session, account: schemas.AccountCreate):
     db.refresh(db_account)
     return db_account
 
-def update_account(db: Session, user_id: int, account_id: int, account: schemas.AccountUpdate):
-    db_account = get_account(db, user_id, account_id)
+def update_account(db: Session, user_id: int, account_id: int, account: schemas.AccountUpdate) -> models.Account:
+    db_account = get_account(db=db, user_id=user_id, account_id=account_id)
     if not db_account:
         raise HTTPException(status_code=404, detail="Account not found")
-    _validate_unique_account(db, account.name, user_id, account_id)
+    _validate_unique_account(db=db, user_id=user_id, name=account.name, exclude_id=account_id)
     
     # Handle account type changes and currency requirements
     update_data = account.model_dump(exclude_unset=True)
@@ -568,35 +560,87 @@ def update_account(db: Session, user_id: int, account_id: int, account: schemas.
     db.refresh(db_account)
     return db_account
 
-def deactivate_account(db: Session, account_id: int):
-    db_account = get_account(db, account_id)
+def deactivate_account(db: Session, user_id: int, account_id: int) -> models.Account:
+    db_account = get_account(db=db, user_id=user_id, account_id=account_id)
     if not db_account:
         raise HTTPException(status_code=404, detail="Account not found")
     db_account.active = False
+    db_account.deleted_at = datetime.now()
     db.commit()
     db.refresh(db_account)
     return db_account
 
-def activate_account(db: Session, account_id: int):
-    db_account = get_account(db, account_id)
+def activate_account(db: Session, user_id: int, account_id: int) -> models.Account:
+    db_account = get_account(db=db, user_id=user_id, account_id=account_id)
     if not db_account:
         raise HTTPException(status_code=404, detail="Account not found")
     db_account.active = True
+    db_account.deleted_at = None
     db.commit()
     db.refresh(db_account)
     return db_account
+
+#--------------------------------
+# FX Rate
+#--------------------------------
+def get_fx_rates_by_date(db: Session, year: int, month: int) -> list[models.FxRate]:
+    query = db.query(models.FxRate).filter(
+        models.FxRate.year == year,
+        models.FxRate.month == month
+    )
+    return query.all()
+
+def get_fx_rate(db: Session, from_currency: str, to_currency: str, year: int, month: int) -> models.FxRate | None:
+    query = db.query(models.FxRate).filter(
+        models.FxRate.from_currency == from_currency,
+        models.FxRate.to_currency == to_currency,
+        models.FxRate.year == year,
+        models.FxRate.month == month
+    )
+    return query.first()
+
+def create_fx_rate(db: Session, fx_rate: schemas.FxRateCreate) -> models.FxRate:
+    db_fx_rate = models.FxRate(
+        from_currency=fx_rate.from_currency,
+        to_currency=fx_rate.to_currency,
+        rate=fx_rate.rate,
+        year=fx_rate.year,
+        month=fx_rate.month
+    )
+    db.add(db_fx_rate)
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=f"Constraint violation: {e.orig}")
+    db.refresh(db_fx_rate)
+    return db_fx_rate
+
+def update_fx_rate(db: Session, fx_rate_id: int, fx_rate: schemas.FxRateUpdate) -> models.FxRate:
+    db_fx_rate = get_fx_rate(db, fx_rate_id)
+    if not db_fx_rate:
+        raise HTTPException(status_code=404, detail="FX rate not found")
+    for key, value in fx_rate.model_dump(exclude_unset=True).items():
+        setattr(db_fx_rate, key, value)
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=f"Constraint violation: {e.orig}")
+    db.refresh(db_fx_rate)
+    return db_fx_rate
 
 #--------------------------------
 # Transaction
 #--------------------------------
-def get_transactions(db: Session, user_id: int, skip: int = 0, limit: int = 50):
+def get_transactions(db: Session, user_id: int, skip: int = 0, limit: int = 50) -> list[models.Transaction]:
     query = db.query(models.Transaction).filter(
         models.Transaction.user_id == user_id, 
         models.Transaction.active == True
     ).order_by(models.Transaction.date.desc())
     return query.offset(skip).limit(limit).all()
 
-def get_transaction(db: Session, user_id: int, transaction_id: int):
+def get_transaction(db: Session, user_id: int, transaction_id: int) -> models.Transaction | None:
     query = db.query(models.Transaction).filter(
         models.Transaction.user_id == user_id,
         models.Transaction.id == transaction_id,
@@ -604,7 +648,7 @@ def get_transaction(db: Session, user_id: int, transaction_id: int):
     )
     return query.first()
     
-def create_transaction(db: Session, tx: Union[schemas.TxCreate, schemas.TxCreateForex]):
+def create_transaction(db: Session, tx: Union[schemas.TxCreate, schemas.TxCreateForex]) -> models.Transaction:
     # Header-level validation
     _validate_tx_header(tx)
 
@@ -640,7 +684,7 @@ def create_transaction(db: Session, tx: Union[schemas.TxCreate, schemas.TxCreate
     db_tx.postings.extend(completed_postings)
 
     # Calculate derived values for tx from first posting
-    amount_hc_primary, amount_oc_primary, currency_primary = _derive_transaction_primary_fields(completed_postings)
+    amount_hc_primary, amount_oc_primary, currency_primary = _derive_transaction_primary_fields(db, db_tx, completed_postings)
     db_tx.amount_hc_primary = amount_hc_primary
     db_tx.amount_oc_primary = abs(amount_oc_primary)
     db_tx.currency_primary = currency_primary
@@ -670,20 +714,22 @@ def update_transaction(db: Session, user_id: int, transaction_id: int, transacti
     db.refresh(db_tx)
     return db_tx
 
-def deactivate_transaction(db: Session, user_id: int, transaction_id: int):
+def deactivate_transaction(db: Session, user_id: int, transaction_id: int) -> models.Transaction:
     db_tx = get_transaction(db, user_id, transaction_id)
     if not db_tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
     db_tx.active = False
+    db_tx.deleted_at = datetime.now()
     db.commit()
     db.refresh(db_tx)
     return db_tx
 
-def activate_transaction(db: Session, user_id: int, transaction_id: int):
+def activate_transaction(db: Session, user_id: int, transaction_id: int) -> models.Transaction:
     db_tx = get_transaction(db, user_id, transaction_id)
     if not db_tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
     db_tx.active = True
+    db_tx.deleted_at = None
     db.commit()
     db.refresh(db_tx)
     return db_tx
@@ -691,119 +737,50 @@ def activate_transaction(db: Session, user_id: int, transaction_id: int):
 #--------------------------------
 # Posting
 #--------------------------------
-def get_postings(db: Session, transaction_id: int):
+def get_postings(db: Session, transaction_id: int) -> list[models.TxPosting]:
     query = db.query(models.TxPosting).filter(
         models.TxPosting.transaction_id == transaction_id,
     )
     return query.all()
 
-def get_posting(db: Session, posting_id: int):
+def get_posting(db: Session, posting_id: int) -> models.TxPosting | None:
     query = db.query(models.TxPosting).filter(
         models.TxPosting.id == posting_id,
     )
     return query.first()
 
-def create_posting(db: Session, transaction_id: int, posting: schemas.TxPostingCreate):
-    # Validate currency is the same as the account currency
-    account = db.query(models.Account).filter(models.Account.id == posting.account_id).first()
-    if account.currency != posting.currency:
-        raise HTTPException(status_code=400, detail="Currency mismatch between account and posting")
-    db_posting = models.TxPosting(
-        transaction_id=transaction_id,
-        amount_oc=posting.amount_oc,
-        currency=posting.currency,
-        fx_rate=posting.fx_rate,
-        amount_hc=posting.amount_hc,
-        account_id=posting.account_id,
-    )
-    db.add(db_posting)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise HTTPException(status_code=409, detail=f"Constraint violation: {e.orig}")
-    db.refresh(db_posting)
-    return db_posting
-
-def update_posting(db: Session, posting_id: int, posting: schemas.TxPostingUpdate):
-    db_posting = get_posting(db, posting_id)
-    if not db_posting:
-        raise HTTPException(status_code=404, detail="Posting not found")
-    # Validate currency is the same as the account currency
-    account = db.query(models.Account).filter(models.Account.id == db_posting.account_id).first()
-    if account.currency != posting.currency:
-        raise HTTPException(status_code=400, detail="Currency mismatch between account and posting")
-    for key, value in posting.model_dump(exclude_unset=True).items():
-        setattr(db_posting, key, value)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise HTTPException(status_code=409, detail=f"Constraint violation: {e.orig}")
-    db.refresh(db_posting)
-    return db_posting
-
 #--------------------------------
 # TransactionSplit
 #--------------------------------
-def get_splits(db: Session, transaction_id: int):
-    query = db.query(models.TransactionSplit).filter(
-        models.TransactionSplit.transaction_id == transaction_id,
+def get_splits(db: Session, transaction_id: int) -> list[models.TxSplit]:
+    query = db.query(models.TxSplit).filter(
+        models.TxSplit.transaction_id == transaction_id,
     )
     return query.all()
 
-def get_split(db: Session, split_id: int):
-    query = db.query(models.TransactionSplit).filter(
-        models.TransactionSplit.id == split_id,
+def get_split(db: Session, split_id: int) -> models.TxSplit | None:
+    query = db.query(models.TxSplit).filter(
+        models.TxSplit.id == split_id,
     )
     return query.first()
-
-def create_split(db: Session, transaction_id: int, split: schemas.TxSplitCreate):
-    db_split = models.TransactionSplit(
-        transaction_id=transaction_id,
-        person_id=split.person_id,
-        share_amount=split.share_amount,
-    )
-    db.add(db_split)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise HTTPException(status_code=409, detail=f"Constraint violation: {e.orig}")
-    db.refresh(db_split)
-    return db_split
-
-def update_split(db: Session, split_id: int, split: schemas.TxSplitUpdate):
-    db_split = get_split(db, split_id)
-    if not db_split:
-        raise HTTPException(status_code=404, detail="Transaction split not found")
-    for key, value in split.model_dump(exclude_unset=True).items():
-        setattr(db_split, key, value)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise HTTPException(status_code=409, detail=f"Constraint violation: {e.orig}")
-    db.refresh(db_split)
-    return db_split
 
 #--------------------------------
 # Budget
 #--------------------------------
-def get_monthly_budget(db: Session, id: int, month: int):
+def get_monthly_budget(db: Session, id: int, month: int) -> models.Budget | None:
     query = db.query(models.Budget).filter(
         models.Budget.id == id,
         models.Budget.month == month
     )
     return query.first()
 
-def get_annual_budget(db: Session, id: int):
+def get_annual_budget(db: Session, id: int) -> models.Budget | None:
     query = db.query(models.Budget).filter(
         models.Budget.id == id,
     )
     return query.first()
 
-def create_annual_budget(db: Session, budget: schemas.BudgetCreate):
+def create_annual_budget(db: Session, budget: schemas.BudgetCreate) -> models.Budget:
     # Validate currency is the same as the account currency
     account = db.query(models.Account).filter(models.Account.id == budget.account_id).first()
     if account.currency != budget.currency:
@@ -829,7 +806,7 @@ def create_annual_budget(db: Session, budget: schemas.BudgetCreate):
     db.refresh(db_budget)
     return db_budget
 
-def update_annual_budget(db: Session, id: int, budget: schemas.BudgetUpdate):
+def update_annual_budget(db: Session, id: int, budget: schemas.BudgetUpdate) -> models.Budget:
     db_budget = get_annual_budget(db, id)
     if not db_budget:
         raise HTTPException(status_code=404, detail="Budget not found")
@@ -843,7 +820,7 @@ def update_annual_budget(db: Session, id: int, budget: schemas.BudgetUpdate):
     db.refresh(db_budget)
     return db_budget
 
-def delete_annual_budget(db: Session, id: int):
+def delete_annual_budget(db: Session, id: int) -> None:
     db_budget = get_annual_budget(db, id)
     if not db_budget:
         raise HTTPException(status_code=404, detail="Budget not found")
@@ -854,7 +831,7 @@ def delete_annual_budget(db: Session, id: int):
 #--------------------------------
 # Report (por validar)
 #--------------------------------
-def get_balances(db: Session):
+def get_balances(db: Session) -> list[schemas.ReportBalance]:
     balances = []
     accounts = db.query(models.Account).all()
     for account in accounts:
@@ -875,7 +852,7 @@ def get_balances(db: Session):
         ))
     return balances
 
-def get_debts(db: Session):
+def get_debts(db: Session) -> list[schemas.ReportDebt]:
     debts = []
     people = db.query(models.Person).all()
     for person in people:
@@ -896,7 +873,7 @@ def get_debts(db: Session):
         ))
     return debts
     
-def get_budget_progress(db: Session, id: int, month: int):
+def get_budget_progress(db: Session, id: int, month: int) -> list[schemas.ReportBudgetProgress]:
     # Get all budgets for the specified month
     budgets = db.query(models.Budget).filter(
         models.Budget.id == id,
@@ -914,7 +891,7 @@ def get_budget_progress(db: Session, id: int, month: int):
     
     return progress_reports
 
-def get_monthly_budget_progress(db: Session, budget_id: int, year: int, month: int):
+def get_monthly_budget_progress(db: Session, budget_id: int, year: int, month: int) -> schemas.ReportBudgetProgress:
     """
     Get monthly budget progress report for a specific budget, year, and month.
     Returns budget amount, actual expenses, and progress by account.

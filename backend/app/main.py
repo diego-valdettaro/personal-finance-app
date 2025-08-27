@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import accounts, categories, transactions, people, reports, budgets
+from .routers import accounts, transactions, people, reports, budgets, users
 from .database import Base, engine
 
 @asynccontextmanager
@@ -29,11 +29,11 @@ app.add_middleware(
 
 # Include routers
 app.include_router(accounts.router)
-app.include_router(categories.router)
 app.include_router(transactions.router)
 app.include_router(people.router)
 app.include_router(reports.router)
 app.include_router(budgets.router)
+app.include_router(users.router)
 
 @app.get("/")
 async def root():

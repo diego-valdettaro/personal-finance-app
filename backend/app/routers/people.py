@@ -9,7 +9,7 @@ router = APIRouter(prefix="/people", tags=["people"])
 @router.post("/", response_model=schemas.PersonOut, status_code=201)
 def create_person(person: schemas.PersonCreate, db: Session = Depends(get_db)):
     return crud.create_person(db, person)
-
+    
 # List all people
 @router.get("/", response_model=list[schemas.PersonOut])
 def get_people(db: Session = Depends(get_db)):
