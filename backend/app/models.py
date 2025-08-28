@@ -148,7 +148,7 @@ class Transaction(Base, softDeleteMixin):
     account_id_secondary: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
     amount_oc_secondary: Mapped[float] = mapped_column(Float, nullable=True)
     currency_secondary: Mapped[str] = mapped_column(String(3), nullable=True)
-    
+
     # absolute value of the first posting amount in the home currency of the user
     tx_amount_hc: Mapped[float] = mapped_column(Float, nullable=True)
 
@@ -163,7 +163,7 @@ class Transaction(Base, softDeleteMixin):
     # Constraints
     __table_args__ = (
         Index("idx_tx_user_id", "user_id"),
-        CheckConstraint("amount_hc > 0", name="ck_tx_amount_positive"),
+        CheckConstraint("tx_amount_hc > 0", name="ck_tx_amount_positive"),
     )
 
 #--------------------------------
@@ -240,6 +240,6 @@ class Budget(Base):
     # Constraints
     __table_args__ = (
         Index("idx_budget_user_id", "user_id"),
-        CheckConstraint("amount > 0", name="ck_budget_amount_positive"),
+        CheckConstraint("amount_oc > 0", name="ck_budget_amount_positive"),
         UniqueConstraint("user_id", "account_id", "year", "month", name="uq_budget_user_account_year_month"),
     )
