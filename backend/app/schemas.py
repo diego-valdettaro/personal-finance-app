@@ -108,7 +108,7 @@ class TxPostingCreateAutomatic(BaseModel):
 
 class TxPostingOut(TxPostingBase):
     id: int
-    transaction_id: int
+    tx_id: int
     account_id: int
     model_config = ConfigDict(from_attributes=True)
 
@@ -165,7 +165,7 @@ class TxOut(TxBase):
     id: int
 
     # Derived values from the first posting
-    amount_hc_primary: float
+    tx_amount_hc: float
 
     postings: list[TxPostingOut] = Field(default_factory=list)
     splits: list[TxSplitOut] = Field(default_factory=list)
@@ -210,8 +210,8 @@ class BudgetOut(BudgetBase):
 class ReportBudgetProgress(BaseModel):
     account_id: int
     account_name: str
-    budget_oc: float
-    actual_oc: float
+    budget_hc: float
+    actual_hc: float
     progress: float
 
 class ReportBalance(BaseModel):

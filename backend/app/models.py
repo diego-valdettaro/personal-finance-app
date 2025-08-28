@@ -125,6 +125,7 @@ class FxRate(Base):
     # Constraints
     __table_args__ = (
         UniqueConstraint("from_currency", "to_currency", "year", "month", name="uq_fx_rates_from_currency_to_currency_year_month"),
+        Index("idx_fx_rates_from_currency_to_currency_year_month", "from_currency", "to_currency", "year", "month"),
     )
 
 #--------------------------------
@@ -139,14 +140,17 @@ class Transaction(Base, softDeleteMixin):
     type: Mapped[TxType] = mapped_column(SAEnum(TxType, name="tx_type", native_enum=False), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     source: Mapped[TxSource] = mapped_column(SAEnum(TxSource, name="tx_source", native_enum=False), nullable=False, default=TxSource.manual)
+    
     account_id_primary: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
-    account_id_secondary: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
     amount_oc_primary: Mapped[float] = mapped_column(Float, nullable=False)
     currency_primary: Mapped[str] = mapped_column(String(3), nullable=False)
+    
+    account_id_secondary: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
     amount_oc_secondary: Mapped[float] = mapped_column(Float, nullable=True)
     currency_secondary: Mapped[str] = mapped_column(String(3), nullable=True)
+    
     # absolute value of the first posting amount in the home currency of the user
-    amount_hc: Mapped[float] = mapped_column(Float, nullable=True)
+    tx_amount_hc: Mapped[float] = mapped_column(Float, nullable=True)
 
     # Foreign keys
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)

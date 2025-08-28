@@ -38,8 +38,11 @@ def _validate_unique_person(db: Session, user_id: int, name: str, is_me: bool, e
     if q.first():
         raise HTTPException(status_code=409, detail=f"Person with name {name} already exists for user {user_id}")
     if is_me:
-        q = q.filter(models.Person.is_me == is_me)
-        if q.first():
+        q_me = db.query(models.Person).filter(
+            models.Person.user_id == user_id,
+            models.Person.is_me == True
+        )
+        if q_me.first():
             raise HTTPException(status_code=409, detail=f"User {user_id} already has a me person defined")
 
 def _validate_unique_account(db: Session, user_id: int, name: str, exclude_id: int | None = None) -> None:
@@ -238,7 +241,6 @@ def _validate_and_complete_postings(db: Session, transaction: models.Transaction
 
     # Build completed postings with signs, currencies, fx_rate and amount_hc
     completed_postings: list[models.TxPosting] = []
-    fx_rates = get_fx_rates_by_date(db=db, year=transaction.date.year, month=transaction.date.month)
 
     for idx, posting in enumerate(postings):
         account = acc_by_id[posting.account_id]
@@ -253,10 +255,13 @@ def _validate_and_complete_postings(db: Session, transaction: models.Transaction
         amount_oc_signed = float(posting.amount_oc) * float(sign)
 
         # FX to home currency and amount in home currency
-        if posting.currency != home_currency:
+        if posting.currency == home_currency:
             fx_rate = 1.0
         else:
-            fx_rate = fx_rates[posting.currency][home_currency]
+            fx_rate_obj = get_fx_rate_by_key(db=db, from_currency=posting.currency, to_currency=home_currency, year=transaction.date.year, month=transaction.date.month)
+            if not fx_rate_obj:
+                raise HTTPException(status_code=404, detail=f"FX rate not found for {posting.currency} to {home_currency}")
+            fx_rate = fx_rate_obj.rate
         
         amount_hc = amount_oc_signed * fx_rate
 
@@ -298,7 +303,10 @@ def _derive_transaction_primary_fields(db: Session, transaction: models.Transact
         if origin.fx_rate and origin.fx_rate > 0:
             fx_rate = origin.fx_rate
         else:
-            fx_rate = get_fx_rate(db=db, from_currency=origin_currency, to_currency=home_currency, year=transaction.date.year, month=transaction.date.month)
+            fx_rate_obj = get_fx_rate_by_key(db=db, from_currency=origin_currency, to_currency=home_currency, year=transaction.date.year, month=transaction.date.month)
+            if not fx_rate_obj:
+                raise HTTPException(status_code=404, detail=f"FX rate not found for {origin_currency} to {home_currency}")
+            fx_rate = fx_rate_obj.rate
 
     amount_oc_primary = abs(float(origin.amount_oc))
     if origin.amount_hc not in (None, 0):
@@ -327,7 +335,10 @@ def _get_amount_multiplier(tx_type: models.TxType, account_type: models.AccountT
             raise HTTPException(status_code=400, detail="Expense transactions require one expense account and one asset account")
     
     elif tx_type == models.TxType.transfer:
-        raise HTTPException(status_code=400, detail="Transfer transactions require two asset accounts")
+        if account_type == models.AccountType.asset:
+            return 1.0 if posting_index == 0 else -1.0
+        else:
+            raise HTTPException(status_code=400, detail="Transfer transactions require two asset accounts")
     
     elif tx_type == models.TxType.credit_card_payment:
         if account_type == models.AccountType.liability:
@@ -335,15 +346,16 @@ def _get_amount_multiplier(tx_type: models.TxType, account_type: models.AccountT
         elif account_type == models.AccountType.asset:
             return -1.0
         else:
-            # Default to first posting debit, second credit
-            return 1.0 if posting_index == 0 else -1.0
-
+            raise HTTPException(status_code=400, detail="Credit card payment transactions require one asset account and one liability account")
+    
     elif tx_type == models.TxType.forex:
-        return 1.0 if posting_index == 0 else -1.0
+        if account_type == models.AccountType.asset:
+            return 1.0 if posting_index == 0 else -1.0
+        else:
+            raise HTTPException(status_code=400, detail="Forex transactions require two asset accounts")
     
     else:
-        # Default to first posting debit, second credit
-        return 1.0 if posting_index == 0 else -1.0
+        raise HTTPException(status_code=400, detail="Unsupported transaction type")
 
 #--------------------------------
 # User
@@ -583,14 +595,13 @@ def activate_account(db: Session, user_id: int, account_id: int) -> models.Accou
 #--------------------------------
 # FX Rate
 #--------------------------------
-def get_fx_rates_by_date(db: Session, year: int, month: int) -> list[models.FxRate]:
+def get_fx_rate_by_id(db: Session, fx_rate_id: int) -> models.FxRate | None:
     query = db.query(models.FxRate).filter(
-        models.FxRate.year == year,
-        models.FxRate.month == month
+        models.FxRate.id == fx_rate_id
     )
-    return query.all()
+    return query.first()
 
-def get_fx_rate(db: Session, from_currency: str, to_currency: str, year: int, month: int) -> models.FxRate | None:
+def get_fx_rate_by_key(db: Session, from_currency: str, to_currency: str, year: int, month: int) -> models.FxRate | None:
     query = db.query(models.FxRate).filter(
         models.FxRate.from_currency == from_currency,
         models.FxRate.to_currency == to_currency,
@@ -616,8 +627,8 @@ def create_fx_rate(db: Session, fx_rate: schemas.FxRateCreate) -> models.FxRate:
     db.refresh(db_fx_rate)
     return db_fx_rate
 
-def update_fx_rate(db: Session, fx_rate_id: int, fx_rate: schemas.FxRateUpdate) -> models.FxRate:
-    db_fx_rate = get_fx_rate(db, fx_rate_id)
+def update_fx_rate_by_key(db: Session, from_currency: str, to_currency: str, year: int, month: int, fx_rate: schemas.FxRateUpdate) -> models.FxRate:
+    db_fx_rate = get_fx_rate_by_key(db, from_currency, to_currency, year, month)
     if not db_fx_rate:
         raise HTTPException(status_code=404, detail="FX rate not found")
     for key, value in fx_rate.model_dump(exclude_unset=True).items():
@@ -685,7 +696,7 @@ def create_transaction(db: Session, tx: Union[schemas.TxCreate, schemas.TxCreate
 
     # Calculate derived values for tx from first posting
     amount_hc_primary, amount_oc_primary, currency_primary = _derive_transaction_primary_fields(db, db_tx, completed_postings)
-    db_tx.amount_hc_primary = amount_hc_primary
+    db_tx.tx_amount_hc = amount_hc_primary
     db_tx.amount_oc_primary = abs(amount_oc_primary)
     db_tx.currency_primary = currency_primary
 
@@ -767,22 +778,28 @@ def get_split(db: Session, split_id: int) -> models.TxSplit | None:
 #--------------------------------
 # Budget
 #--------------------------------
-def get_monthly_budget(db: Session, id: int, month: int) -> models.Budget | None:
+def get_monthly_budget(db: Session, user_id: int, budget_id: int, year: int, month: int) -> models.Budget | None:
     query = db.query(models.Budget).filter(
-        models.Budget.id == id,
+        models.Budget.id == budget_id,
+        models.Budget.user_id == user_id,
+        models.Budget.year == year,
         models.Budget.month == month
     )
     return query.first()
 
-def get_annual_budget(db: Session, id: int) -> models.Budget | None:
+def get_annual_budget(db: Session, user_id: int, budget_id: int, year: int) -> models.Budget | None:
     query = db.query(models.Budget).filter(
-        models.Budget.id == id,
+        models.Budget.id == budget_id,
+        models.Budget.user_id == user_id,
+        models.Budget.year == year
     )
     return query.first()
 
-def create_annual_budget(db: Session, budget: schemas.BudgetCreate) -> models.Budget:
+def create_annual_budget(db: Session, user_id: int, budget: schemas.BudgetCreate) -> models.Budget:
     # Validate currency is the same as the account currency
-    account = db.query(models.Account).filter(models.Account.id == budget.account_id).first()
+    account = get_account(db, user_id, budget.account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
     if account.currency != budget.currency:
         raise HTTPException(status_code=400, detail="Currency mismatch between account and budget")
     db_budget = models.Budget(
@@ -794,8 +811,8 @@ def create_annual_budget(db: Session, budget: schemas.BudgetCreate) -> models.Bu
         amount_hc=budget.amount_hc,
         fx_rate=budget.fx_rate,
         description=budget.description,
-        user_id=budget.user_id,
-        account_id=budget.account_id
+        user_id=user_id,
+        account_id=account.id
     )
     db.add(db_budget)
     try:
@@ -806,8 +823,8 @@ def create_annual_budget(db: Session, budget: schemas.BudgetCreate) -> models.Bu
     db.refresh(db_budget)
     return db_budget
 
-def update_annual_budget(db: Session, id: int, budget: schemas.BudgetUpdate) -> models.Budget:
-    db_budget = get_annual_budget(db, id)
+def update_annual_budget(db: Session, user_id: int, budget_id: int, budget: schemas.BudgetUpdate) -> models.Budget:
+    db_budget = get_annual_budget(db, user_id, budget_id)
     if not db_budget:
         raise HTTPException(status_code=404, detail="Budget not found")
     for key, value in budget.model_dump(exclude_unset=True).items():
@@ -873,41 +890,21 @@ def get_debts(db: Session) -> list[schemas.ReportDebt]:
         ))
     return debts
     
-def get_budget_progress(db: Session, id: int, month: int) -> list[schemas.ReportBudgetProgress]:
-    # Get all budgets for the specified month
-    budgets = db.query(models.Budget).filter(
-        models.Budget.id == id,
+def get_monthly_budget_progress(db: Session, user_id: int, budget_id: int, year: int, month: int) -> list[schemas.ReportBudgetProgress]:
+    """
+    Get monthly budget progress report for a specific budget, year, and month.
+    Returns budget amount, actual expenses, and progress by account for all budget lines in the home currency.
+    """
+    # Get all budget lines for the specified budget, year, and month
+    budget_lines = db.query(models.Budget).filter(
+        models.Budget.id == budget_id,
+        models.Budget.user_id == user_id,
+        models.Budget.year == year,
         models.Budget.month == month
     ).all()
     
-    progress_reports = []
-    for budget in budgets:
-        try:
-            progress_report = get_monthly_budget_progress(db, budget.id, budget.year, budget.month)
-            progress_reports.append(progress_report)
-        except HTTPException:
-            # Skip budgets that can't be processed
-            continue
-    
-    return progress_reports
-
-def get_monthly_budget_progress(db: Session, budget_id: int, year: int, month: int) -> schemas.ReportBudgetProgress:
-    """
-    Get monthly budget progress report for a specific budget, year, and month.
-    Returns budget amount, actual expenses, and progress by account.
-    """
-    # Get the specific budget
-    budget = db.query(models.Budget).filter(
-        models.Budget.id == budget_id,
-        models.Budget.year == year,
-        models.Budget.month == month
-    ).first()
-    
-    if not budget:
+    if not budget_lines:
         raise HTTPException(status_code=404, detail="Budget not found")
-    
-    # Get all transactions for the budget's account in the specified month
-    # We need to join with postings to get transactions for the specific account
     
     # Calculate date range for the month
     start_date = date(year, month, 1)
@@ -916,31 +913,36 @@ def get_monthly_budget_progress(db: Session, budget_id: int, year: int, month: i
     else:
         end_date = date(year, month + 1, 1)
     
-    transactions = db.query(models.Transaction).join(
-        models.Posting, models.Transaction.id == models.Posting.transaction_id
-    ).filter(
-        models.Posting.account_id == budget.account_id,
-        models.Transaction.date >= start_date,
-        models.Transaction.date < end_date,
-        models.Transaction.type == models.TxType.expense,
-        models.Transaction.active == True
-    ).all()
+    progress_reports = []
     
-    # Calculate total actual expenses in home currency
-    total_actual_hc = sum(transaction.amount_hc for transaction in transactions)
+    for budget_line in budget_lines:
+        # Get all postings for this budget line's account in the specified month
+        postings = db.query(models.TxPosting).join(
+            models.Transaction, models.TxPosting.tx_id == models.Transaction.id
+        ).filter(
+            models.TxPosting.account_id == budget_line.account_id,
+            models.Transaction.date >= start_date,
+            models.Transaction.date < end_date,
+            models.Transaction.active == True
+        ).all()
+        
+        # Calculate total actual amount in home currency
+        total_actual_hc = sum(posting.amount_hc for posting in postings)
+        
+        # Calculate progress (actual / budget) - using home currency for comparison
+        progress = (total_actual_hc / budget_line.amount_hc) if budget_line.amount_hc > 0 else 0.0
+        
+        # Get account name
+        account = get_account(db, user_id, budget_line.account_id)
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+        
+        progress_reports.append(schemas.ReportBudgetProgress(
+            account_id=budget_line.account_id,
+            account_name=account.name,
+            budget_hc=budget_line.amount_hc,
+            actual_hc=total_actual_hc,
+            progress=progress
+        ))
     
-    # Calculate progress (actual / budget)
-    progress = (total_actual_hc / budget.amount_hc) if budget.amount_hc > 0 else 0.0
-    
-    # Get account name
-    account = db.query(models.Account).filter(models.Account.id == budget.account_id).first()
-    account_name = account.name if account else "Unknown Account"
-    
-    return schemas.ReportBudgetProgress(
-        account_id=budget.account_id,
-        account_name=account_name,
-        budget_hc=budget.amount_hc,
-        actual_hc=total_actual_hc,
-        progress=progress
-    )
-
+    return progress_reports
