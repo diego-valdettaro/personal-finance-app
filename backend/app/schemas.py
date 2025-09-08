@@ -38,7 +38,7 @@ class PersonCreate(PersonBase):
 
 class PersonUpdate(BaseModel):
     name: Optional[str] = Field(min_length=1, max_length=100)
-    is_me: Optional[bool] = Field(default=False)
+    is_me: Optional[bool] = None
 
 class PersonOut(PersonBase):
     id: int
@@ -50,18 +50,25 @@ class PersonOut(PersonBase):
 class AccountBase(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     type: AccountType
-    currency: Optional[str] = Field(min_length=3, max_length=3)
-    opening_balance: float = Field(ge=0.0)
+
+class AccountCreateIncomeExpense(AccountBase):
+    user_id: int
+
+class AccountCreateAsset(AccountBase):
+    user_id: int
+    currency: str = Field(min_length=3, max_length=3)
+    bank_name: Optional[str] = None
+    opening_balance: Optional[float] = Field(ge=0.0)
+
+class AccountCreateLiability(AccountCreateAsset):
     billing_day: Optional[int] = None
     due_day: Optional[int] = None
-
-class AccountCreate(AccountBase):
-    user_id: int
 
 class AccountUpdate(BaseModel):
     name: Optional[str] = Field(min_length=1, max_length=100)
     type: Optional[AccountType] = None
     currency: Optional[str] = Field(min_length=3, max_length=3)
+    bank_name: Optional[str] = None
     opening_balance: Optional[float] = Field(ge=0.0)
     billing_day: Optional[int] = None
     due_day: Optional[int] = None
@@ -76,7 +83,7 @@ class AccountOut(AccountBase):
 class FxRateBase(BaseModel):
     from_currency: str = Field(min_length=3, max_length=3)
     to_currency: str = Field(min_length=3, max_length=3)
-    rate: float = Field(ge=0.0)
+    rate: float = Field(gt=0.0)
     year: int
     month: int
 
@@ -84,7 +91,7 @@ class FxRateCreate(FxRateBase):
     pass
 
 class FxRateUpdate(BaseModel):
-    rate: Optional[float] = Field(ge=0.0)
+    rate: Optional[float] = Field(gt=0.0)
 
 class FxRateOut(FxRateBase):
     id: int
@@ -116,7 +123,7 @@ class TxPostingOut(TxPostingBase):
 # TxSplit Schemas
 #--------------------------------
 class TxSplitBase(BaseModel):
-    share_amount: float = Field(ge=0.0)
+    share_amount: float = Field(gt=0.0)
 
 class TxSplitOut(TxSplitBase):
     id: int
@@ -129,9 +136,9 @@ class TxBase(BaseModel):
     date: datetime
     type: TxType
     description: Optional[str] = None
-    source: TxSource
+    source: TxSource = TxSource.manual
     amount_oc_primary: float
-    currency_primary: str
+    currency_primary: str = Field(min_length=3, max_length=3)
 
     # Account for the first posting - origin account
     account_id_primary: int
@@ -144,7 +151,7 @@ class TxCreate(TxBase):
 class TxCreateForex(TxBase):
     user_id: int
     amount_oc_secondary: float
-    currency_secondary: str
+    currency_secondary: str = Field(min_length=3, max_length=3)
 
 class TxUpdate(BaseModel):
     date: Optional[datetime] = None
@@ -179,10 +186,10 @@ class BudgetBase(BaseModel):
     year: int
 
 class BudgetLineCreate(BaseModel):
-    month: int
+    month: int = Field(ge=1, le=12)
     account_id: int
     amount_oc: float
-    currency: str
+    currency: str = Field(min_length=3, max_length=3)
     amount_hc: float
     fx_rate: Optional[float] = None
     description: Optional[str] = None
@@ -201,7 +208,7 @@ class BudgetLineOut(BudgetLineCreate):
 
 class BudgetOut(BudgetBase):
     id: int
-    lines: list[BudgetLineOut] = []
+    lines: list[BudgetLineOut] = Field(default_factory=list)
     model_config = ConfigDict(from_attributes=True)
 
 #--------------------------------
@@ -218,7 +225,7 @@ class ReportBalance(BaseModel):
     account_id: int
     account_name: str
     balance: float
-    currency: str
+    currency: str = Field(min_length=3, max_length=3)
 
 class ReportDebt(BaseModel):
     person_id: int

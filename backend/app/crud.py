@@ -20,9 +20,9 @@ BALANCE_ABS_TOL = 0.000001
 def _validate_unique_user(db: Session, name: str, email: str | None, exclude_id: int | None = None) -> None:
     query = db.query(models.User)
     q = query.filter(models.User.name == name)
-    if email:
-        q = query.filter(models.User.email == email)
-    if exclude_id:
+    if email is not None:
+        q = q.filter(models.User.email == email)
+    if exclude_id is not None:
         q = q.filter(models.User.id != exclude_id)
     if q.first():
         raise HTTPException(status_code=409, detail=f"User with name {name} or email {email} already exists")
@@ -33,7 +33,7 @@ def _validate_unique_person(db: Session, user_id: int, name: str, is_me: bool, e
         models.Person.user_id == user_id,
         models.Person.name == name
     )
-    if exclude_id:
+    if exclude_id is not None:
         q = q.filter(models.Person.id != exclude_id)
     if q.first():
         raise HTTPException(status_code=409, detail=f"Person with name {name} already exists for user {user_id}")
@@ -42,19 +42,43 @@ def _validate_unique_person(db: Session, user_id: int, name: str, is_me: bool, e
             models.Person.user_id == user_id,
             models.Person.is_me == True
         )
+        if exclude_id is not None:
+            q_me = q_me.filter(models.Person.id != exclude_id)
         if q_me.first():
             raise HTTPException(status_code=409, detail=f"User {user_id} already has a me person defined")
 
-def _validate_unique_account(db: Session, user_id: int, name: str, exclude_id: int | None = None) -> None:
+def _validate_unique_account(db: Session, user_id: int, name: str, type: models.AccountType, exclude_id: int | None = None) -> None:
     query = db.query(models.Account)    
     q = query.filter(
         models.Account.user_id == user_id,
-        models.Account.name == name
+        models.Account.name == name,
+        models.Account.type == type
     )
-    if exclude_id:
+    if exclude_id is not None:
         q = q.filter(models.Account.id != exclude_id)
     if q.first():
-        raise HTTPException(status_code=409, detail=f"Account with name {name} already exists for user {user_id}")
+        raise HTTPException(status_code=409, detail=f"Account with name {name} and type {type} already exists for user {user_id}")
+
+def _validate_account_header(account: Union[schemas.AccountCreateIncomeExpense, schemas.AccountCreateAsset, schemas.AccountCreateLiability]) -> None:
+    if account.type in [models.AccountType.asset, models.AccountType.liability]:
+        if account.currency is None:
+            raise HTTPException(status_code=400, detail="Currency is required for asset and liability accounts")
+        if account.type == models.AccountType.asset:
+            if account.billing_day is not None:
+                raise HTTPException(status_code=400, detail="Billing day should not be specified for asset accounts")
+            if account.due_day is not None:
+                raise HTTPException(status_code=400, detail="Due day should not be specified for asset accounts")
+    else:
+        if account.currency is not None:
+            raise HTTPException(status_code=400, detail="Currency should not be specified for non-asset and non-liability accounts")
+        if account.bank_name is not None:
+            raise HTTPException(status_code=400, detail="Bank name should not be specified for non-asset and non-liability accounts")
+        if account.opening_balance is None:
+            raise HTTPException(status_code=400, detail="Opening balance should not be specified for non-asset and non-liability accounts")
+        if account.billing_day is not None:
+            raise HTTPException(status_code=400, detail="Billing day should not be specified for non-asset and non-liability accounts")
+        if account.due_day is not None:
+            raise HTTPException(status_code=400, detail="Due day should not be specified for non-asset and non-liability accounts")
 
 def _validate_tx_header(tx: Union[schemas.TxCreate, schemas.TxCreateForex]) -> None:
     """
@@ -267,7 +291,7 @@ def _validate_and_complete_postings(db: Session, transaction: models.Transaction
 
         # Create the posting
         completed_postings.append(models.TxPosting(
-            transaction_id=transaction.id,
+            tx_id=transaction.id,
             account_id=account.id,
             amount_oc=amount_oc_signed,
             currency=posting.currency,
@@ -408,6 +432,9 @@ def deactivate_user(db: Session, user_id: int) -> models.User:
     db_user = get_user(db, user_id)
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
+    # Validate that there is at least one user active
+    if db.query(models.User).filter(models.User.active == True).count() == 1:
+        raise HTTPException(status_code=400, detail="Cannot deactivate last active user")
     db_user.active = False
     db_user.deleted_at = datetime.now()
     db.commit()
@@ -514,23 +541,22 @@ def get_account(db: Session, user_id: int, account_id: int) -> models.Account | 
     )
     return query.first()
 
-def create_account(db: Session, account: schemas.AccountCreate) -> models.Account:
-    _validate_unique_account(db=db, user_id=account.user_id, name=account.name)
+def create_account(db: Session, account: Union[schemas.AccountCreateIncomeExpense, schemas.AccountCreateAsset, schemas.AccountCreateLiability]) -> models.Account:
+    # Validations
+    _validate_unique_account(db=db, user_id=account.user_id, name=account.name, type=account.type)
+    _validate_account_header(account=account)
 
-    # Validate currency based on account type
-    if account.type in [models.AccountType.income, models.AccountType.expense, models.AccountType.equity] and account.currency is not None:
-        raise HTTPException(status_code=400, detail=f"Currency should not be specified for {account.type} accounts")
-    elif account.type in [models.AccountType.asset, models.AccountType.liability] and account.currency is None:
-        raise HTTPException(status_code=400, detail=f"Currency is required for {account.type} accounts")
-    
+    # Create account
     db_account = models.Account(
         user_id=account.user_id,
         name=account.name,
         type=account.type,
-        currency=account.currency,    
-        opening_balance=account.opening_balance,
-        billing_day=account.billing_day,
-        due_day=account.due_day
+        currency=getattr(account, "currency", None),    
+        opening_balance=getattr(account, "opening_balance", None),
+        current_balance=getattr(account, "opening_balance", None),
+        bank_name=getattr(account, "bank_name", None),
+        billing_day=getattr(account, "billing_day", None),
+        due_day=getattr(account, "due_day", None)
     )
     db.add(db_account)
     try:
@@ -541,27 +567,15 @@ def create_account(db: Session, account: schemas.AccountCreate) -> models.Accoun
     db.refresh(db_account)
     return db_account
 
+#TODO: revisar si es necesario hacer el UNION como en create_account
 def update_account(db: Session, user_id: int, account_id: int, account: schemas.AccountUpdate) -> models.Account:
     db_account = get_account(db=db, user_id=user_id, account_id=account_id)
     if not db_account:
         raise HTTPException(status_code=404, detail="Account not found")
-    _validate_unique_account(db=db, user_id=user_id, name=account.name, exclude_id=account_id)
-    
-    # Handle account type changes and currency requirements
-    update_data = account.model_dump(exclude_unset=True)
-    
-    # If account type is being changed, handle currency appropriately
-    if 'type' in update_data:
-        new_type = update_data['type']
-        if new_type in [models.AccountType.income, models.AccountType.expense, models.AccountType.equity]:
-            # Clear currency for income/expense/equity accounts
-            update_data['currency'] = None
-        elif new_type in [models.AccountType.asset, models.AccountType.liability]:
-            # Ensure currency is set for asset/liability accounts
-            if 'currency' not in update_data or update_data['currency'] is None:
-                raise HTTPException(status_code=400, detail=f"Currency is required when changing account type to {new_type}")
-    
-    for key, value in update_data.items():
+    _validate_unique_account(db=db, user_id=user_id, name=account.name, type=account.type, exclude_id=account_id)
+    _validate_account_header(account=account)
+
+    for key, value in account.model_dump(exclude_unset=True).items():
         setattr(db_account, key, value)
     
     try:
@@ -709,6 +723,7 @@ def create_transaction(db: Session, tx: Union[schemas.TxCreate, schemas.TxCreate
     db.refresh(db_tx)
     return db_tx
 
+#TODO: revisar si es necesario hacer el UNION como en create_transaction
 def update_transaction(db: Session, user_id: int, transaction_id: int, transaction: schemas.TxUpdate):
     db_tx = get_transaction(db, user_id, transaction_id)
     if not db_tx:
@@ -750,7 +765,7 @@ def activate_transaction(db: Session, user_id: int, transaction_id: int) -> mode
 #--------------------------------
 def get_postings(db: Session, transaction_id: int) -> list[models.TxPosting]:
     query = db.query(models.TxPosting).filter(
-        models.TxPosting.transaction_id == transaction_id,
+        models.TxPosting.tx_id == transaction_id,
     )
     return query.all()
 
