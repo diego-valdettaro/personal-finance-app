@@ -40,7 +40,7 @@ class User(Base, SoftDeleteMixin):
 
     # Columns
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     home_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now())
@@ -50,6 +50,14 @@ class User(Base, SoftDeleteMixin):
     accounts: Mapped[List["Account"]] = relationship(back_populates="user")
     txs: Mapped[List["Transaction"]] = relationship(back_populates="user")
     budgets: Mapped[List["BudgetHeader"]] = relationship(back_populates="user")
+
+    # Constraints
+    __table_args__ = (
+        Index("uq_active_user_email", "email", unique=True, sqlite_where=text("active = 1")),
+        CheckConstraint("char_length(home_currency) = 3", name="ck_user_home_currency_length"),
+        CheckConstraint("(active = 0 AND deleted_at IS NOT NULL) OR (active = 1 AND deleted_at IS NULL)", name="ck_user_soft_delete_consistency"),
+        Index("idx_user_active", "active"),
+    )
 
 #--------------------------------
 # Person
@@ -72,6 +80,8 @@ class Person(Base, SoftDeleteMixin):
     # Constraints
     __table_args__ = (
         UniqueConstraint("user_id", "name", name="uq_person_user_name"),
+        CheckConstraint("(active = 0 AND deleted_at IS NOT NULL) OR (active = 1 AND deleted_at IS NULL)", name="ck_person_soft_delete_consistency"),
+        Index("idx_person_active", "active"),
         Index("uq_one_me_per_user", "user_id", unique=True, sqlite_where=text("is_me = 1")),
         Index("uq_person_user_name_active", "user_id", "name", unique=True, sqlite_where=text("active = 1")),
     )
@@ -129,6 +139,8 @@ class FxRate(Base):
     __table_args__ = (
         UniqueConstraint("from_currency", "to_currency", "year", "month", name="uq_fx_rates_from_currency_to_currency_year_month"),
         Index("idx_fx_rates_from_currency_to_currency_year_month", "from_currency", "to_currency", "year", "month"),
+        CheckConstraint("rate > 0", name="ck_fx_rate_positive"),
+        CheckConstraint("month BETWEEN 1 AND 12", name="ck_fx_rate_month_range"),
     )
 
 #--------------------------------
@@ -169,6 +181,8 @@ class Transaction(Base, SoftDeleteMixin):
     __table_args__ = (
         Index("idx_tx_user_id", "user_id"),
         CheckConstraint("tx_amount_hc > 0", name="ck_tx_amount_positive"),
+        CheckConstraint("amount_oc_primary > 0", name="ck_tx_amount_oc_primary_positive"),
+        CheckConstraint("amount_oc_secondary IS NULL OR amount_oc_secondary > 0", name="ck_tx_amount_oc_secondary_positive"),
     )
 
 # Transaction Posting
@@ -190,6 +204,15 @@ class TxPosting(Base, SoftDeleteMixin):
     # Relationships
     tx: Mapped["Transaction"] = relationship(back_populates="postings")
     account: Mapped["Account"] = relationship(back_populates="postings")
+    
+    # Constraints
+    __table_args__ = (
+        CheckConstraint("amount_oc <> 0", name="ck_tx_posting_amount_oc_not_zero"),
+        CheckConstraint("amount_hc <> 0", name="ck_tx_posting_amount_hc_not_zero"),
+        CheckConstraint("(amount_oc > 0 AND amount_hc > 0) OR (amount_oc < 0 AND amount_hc < 0)", name="ck_tx_posting_sign_consistent"),
+        CheckConstraint("char_length(currency) <= 3", name="ck_tx_posting_currency_length"),
+        CheckConstraint("fx_rate IS NULL OR fx_rate > 0", name="ck_tx_posting_fx_rate_positive"),
+    )
 
 # Transaction Split
 class TxSplit(Base, SoftDeleteMixin):
@@ -269,9 +292,10 @@ class BudgetLine(Base):
     __table_args__ = (
         Index("idx_budget_line_header_id", "header_id"),
         Index("idx_budget_line_account_id", "account_id"),
-        CheckConstraint("month >= 1 AND month <= 12", name="ck_budget_line_month_range"),
-        CheckConstraint("amount_oc > 0", name="ck_budget_line_amount_oc_positive"),
-        CheckConstraint("amount_hc > 0", name="ck_budget_line_amount_hc_positive"),
+        CheckConstraint("month BETWEEN 1 AND 12", name="ck_budget_line_month_range"),
+        CheckConstraint("amount_oc >= 0", name="ck_budget_line_amount_oc_non_negative"),
+        CheckConstraint("amount_hc >= 0", name="ck_budget_line_amount_hc_non_negative"),
+        CheckConstraint("fx_rate IS NULL OR fx_rate > 0", name="ck_budget_line_fx_rate_positive"),
         CheckConstraint("char_length(currency) <= 3", name="ck_budget_line_currency_length"),
         Index("uq_active_budget_line_header_account_month", "header_id", "account_id", "month", unique=True, sqlite_where=text("active = 1")),
     )
