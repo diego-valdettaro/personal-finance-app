@@ -1,4 +1,4 @@
-from sqlalchemy import Integer, Numeric, String, Boolean, ForeignKey, Text, UniqueConstraint, Index, CheckConstraint, DateTime, func
+from sqlalchemy import Integer, Numeric, String, Boolean, ForeignKey, text, UniqueConstraint, Index, CheckConstraint, DateTime, func
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from enum import Enum as PyEnum
 from sqlalchemy.types import Enum as SAEnum
@@ -30,10 +30,10 @@ class TxType(str, PyEnum):
 
 class SoftDeleteMixin:
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 #--------------------------------
-# Users
+# User
 #--------------------------------
 class User(Base, SoftDeleteMixin):
     __tablename__ = "users"
@@ -41,7 +41,7 @@ class User(Base, SoftDeleteMixin):
     # Columns
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
-    email: Mapped[str] = mapped_column(String(255), nullable=True, unique=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     home_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now())
 
@@ -49,10 +49,10 @@ class User(Base, SoftDeleteMixin):
     people: Mapped[List["Person"]] = relationship(back_populates="user")
     accounts: Mapped[List["Account"]] = relationship(back_populates="user")
     txs: Mapped[List["Transaction"]] = relationship(back_populates="user")
-    budgets: Mapped[List["Budget"]] = relationship(back_populates="user")
+    budgets: Mapped[List["BudgetHeader"]] = relationship(back_populates="user")
 
 #--------------------------------
-# People
+# Person
 #--------------------------------
 class Person(Base, SoftDeleteMixin):
     __tablename__ = "people"
@@ -72,12 +72,12 @@ class Person(Base, SoftDeleteMixin):
     # Constraints
     __table_args__ = (
         UniqueConstraint("user_id", "name", name="uq_person_user_name"),
-        Index("uq_one_me_per_user", "user_id", unique=True, sqlite_where=Text("is_me = 1")),
-        Index("uq_person_user_name_active", "user_id", "name", unique=True, sqlite_where=Text("active = 1")),
+        Index("uq_one_me_per_user", "user_id", unique=True, sqlite_where=text("is_me = 1")),
+        Index("uq_person_user_name_active", "user_id", "name", unique=True, sqlite_where=text("active = 1")),
     )
 
 #--------------------------------
-# Accounts
+# Account
 #--------------------------------
 class Account(Base, SoftDeleteMixin):
     __tablename__ = "accounts"
@@ -88,12 +88,12 @@ class Account(Base, SoftDeleteMixin):
     type: Mapped[AccountType] = mapped_column(SAEnum(AccountType, name="account_type", native_enum=False), nullable=False)
 
     # For asset and liability accounts
-    currency: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
-    opening_balance: Mapped[Optional[float]] = mapped_column(Numeric(18, 2), nullable=True)
-    current_balance: Mapped[Optional[float]] = mapped_column(Numeric(18, 2), nullable=True)
-    bank_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    billing_day: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    due_day: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    currency: Mapped[Optional[str]] = mapped_column(String(3))
+    opening_balance: Mapped[Optional[float]] = mapped_column(Numeric(18, 2))
+    current_balance: Mapped[Optional[float]] = mapped_column(Numeric(18, 2))
+    bank_name: Mapped[Optional[str]] = mapped_column(String(100))
+    billing_day: Mapped[Optional[int]] = mapped_column(Integer)
+    due_day: Mapped[Optional[int]] = mapped_column(Integer)
 
     # Foreign keys
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
@@ -101,7 +101,7 @@ class Account(Base, SoftDeleteMixin):
     # Relationships
     user: Mapped["User"] = relationship(back_populates="accounts")
     postings: Mapped[List["TxPosting"]] = relationship(back_populates="account")
-    budgets: Mapped[List["Budget"]] = relationship(back_populates="account")
+    budget_lines: Mapped[List["BudgetLine"]] = relationship(back_populates="account", passive_deletes=True)
 
     __table_args__ = (
         UniqueConstraint("user_id", "name", name="uq_account_user_name"),
@@ -112,7 +112,7 @@ class Account(Base, SoftDeleteMixin):
     )
 
 #--------------------------------
-# FX rates
+# FX rate
 #--------------------------------
 class FxRate(Base):
     __tablename__ = "fx_rates"
@@ -132,8 +132,10 @@ class FxRate(Base):
     )
 
 #--------------------------------
-# Transactions
+# Transaction
 #--------------------------------
+
+# Transaction Header
 class Transaction(Base, SoftDeleteMixin):
     __tablename__ = "transactions"
 
@@ -141,7 +143,7 @@ class Transaction(Base, SoftDeleteMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now())
     type: Mapped[TxType] = mapped_column(SAEnum(TxType, name="tx_type", native_enum=False), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(String(255))
     source: Mapped[TxSource] = mapped_column(SAEnum(TxSource, name="tx_source", native_enum=False), nullable=False, default=TxSource.manual)
     
     account_id_primary: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
@@ -149,11 +151,11 @@ class Transaction(Base, SoftDeleteMixin):
     currency_primary: Mapped[str] = mapped_column(String(3), nullable=False)
     
     account_id_secondary: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
-    amount_oc_secondary: Mapped[Optional[float]] = mapped_column(Numeric(18, 2), nullable=True)
-    currency_secondary: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
+    amount_oc_secondary: Mapped[Optional[float]] = mapped_column(Numeric(18, 2))
+    currency_secondary: Mapped[Optional[str]] = mapped_column(String(3))
 
     # absolute value of the first posting amount in the home currency of the user
-    tx_amount_hc: Mapped[Optional[float]] = mapped_column(Numeric(18, 2), nullable=True)
+    tx_amount_hc: Mapped[Optional[float]] = mapped_column(Numeric(18, 2))
 
     # Foreign keys
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
@@ -169,9 +171,7 @@ class Transaction(Base, SoftDeleteMixin):
         CheckConstraint("tx_amount_hc > 0", name="ck_tx_amount_positive"),
     )
 
-#--------------------------------
-# Postings
-#--------------------------------
+# Transaction Posting
 class TxPosting(Base, SoftDeleteMixin):
     __tablename__ = "tx_postings"
 
@@ -180,7 +180,7 @@ class TxPosting(Base, SoftDeleteMixin):
     # absolute value of first posting amount in the home currency of the user
     amount_oc: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
-    fx_rate: Mapped[Optional[float]] = mapped_column(Numeric(18, 6), nullable=True)
+    fx_rate: Mapped[Optional[float]] = mapped_column(Numeric(18, 6))
     amount_hc: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
 
     # Foreign keys
@@ -191,9 +191,7 @@ class TxPosting(Base, SoftDeleteMixin):
     tx: Mapped["Transaction"] = relationship(back_populates="postings")
     account: Mapped["Account"] = relationship(back_populates="postings")
 
-#--------------------------------
-# TransactionSplit
-#--------------------------------
+# Transaction Split
 class TxSplit(Base, SoftDeleteMixin):
     __tablename__ = "tx_splits"
 
@@ -217,9 +215,11 @@ class TxSplit(Base, SoftDeleteMixin):
     )
 
 #--------------------------------
-# Budgets
+# Budget
 #--------------------------------
-class BudgetHeader(Base, SoftDeleteMixin):
+
+# Budget Header
+class BudgetHeader(Base):
     __tablename__ = "budget_headers"
 
     # Columns
@@ -228,18 +228,23 @@ class BudgetHeader(Base, SoftDeleteMixin):
     year: Mapped[int] = mapped_column(Integer, nullable=False)
     
     # Foreign keys
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)    
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)    
 
     # Relationships
     user: Mapped["User"] = relationship(back_populates="budgets")
-    lines: Mapped[List["BudgetLine"]] = relationship(back_populates="header")
+    budget_lines: Mapped[List["BudgetLine"]] = relationship(
+        back_populates="header",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     # Constraints
     __table_args__ = (
         Index("idx_budget_header_user_id", "user_id"),
-        UniqueConstraint("user_id", "name", "year", name="uq_budget_user_name_year"),
+        UniqueConstraint("user_id", "name", "year", name="uq_budget_header_user_name_year"),
     )
 
+# Budget Line
 class BudgetLine(Base):
     __tablename__ = "budget_lines"
     
@@ -249,20 +254,24 @@ class BudgetLine(Base):
     amount_oc: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     amount_hc: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)	
-    fx_rate: Mapped[Optional[float]] = mapped_column(Numeric(18, 6), nullable=True)
-    description: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    fx_rate: Mapped[Optional[float]] = mapped_column(Numeric(18, 6))
+    description: Mapped[Optional[str]] = mapped_column(String(100))
 
     # Foreign keys
-    header_id: Mapped[int] = mapped_column(ForeignKey("budget_headers.id"), nullable=False)
-    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
+    header_id: Mapped[int] = mapped_column(ForeignKey("budget_headers.id", ondelete="CASCADE"), nullable=False)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False)
 
     # Relationships
-    header: Mapped["BudgetHeader"] = relationship(back_populates="lines")
-    account: Mapped["Account"] = relationship(back_populates="lines")
+    header: Mapped["BudgetHeader"] = relationship(back_populates="budget_lines", passive_deletes=True)
+    account: Mapped["Account"] = relationship(back_populates="budget_lines")
     
     # Constraints
     __table_args__ = (
         Index("idx_budget_line_header_id", "header_id"),
         Index("idx_budget_line_account_id", "account_id"),
-        UniqueConstraint("header_id", "account_id", "month", name="uq_budget_line_header_account_month"),
+        CheckConstraint("month >= 1 AND month <= 12", name="ck_budget_line_month_range"),
+        CheckConstraint("amount_oc > 0", name="ck_budget_line_amount_oc_positive"),
+        CheckConstraint("amount_hc > 0", name="ck_budget_line_amount_hc_positive"),
+        CheckConstraint("char_length(currency) <= 3", name="ck_budget_line_currency_length"),
+        Index("uq_active_budget_line_header_account_month", "header_id", "account_id", "month", unique=True, sqlite_where=text("active = 1")),
     )

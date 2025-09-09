@@ -744,8 +744,15 @@ def deactivate_transaction(db: Session, user_id: int, transaction_id: int) -> mo
     db_tx = get_transaction(db, user_id, transaction_id)
     if not db_tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
+    now = datetime.now()
     db_tx.active = False
-    db_tx.deleted_at = datetime.now()
+    db_tx.deleted_at = now
+    for posting in db_tx.postings:
+        posting.active = False
+        posting.deleted_at = now
+    for split in db_tx.splits:
+        split.active = False
+        split.deleted_at = now
     db.commit()
     db.refresh(db_tx)
     return db_tx
@@ -754,8 +761,15 @@ def activate_transaction(db: Session, user_id: int, transaction_id: int) -> mode
     db_tx = get_transaction(db, user_id, transaction_id)
     if not db_tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
+    now = datetime.now()
     db_tx.active = True
     db_tx.deleted_at = None
+    for posting in db_tx.postings:
+        posting.active = True
+        posting.deleted_at = None
+    for split in db_tx.splits:
+        split.active = True
+        split.deleted_at = None
     db.commit()
     db.refresh(db_tx)
     return db_tx

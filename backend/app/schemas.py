@@ -182,7 +182,7 @@ class TxOut(TxBase):
 # Budget Schemas
 #--------------------------------
 class BudgetBase(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=20)
     year: int
 
 class BudgetLineCreate(BaseModel):
@@ -192,18 +192,30 @@ class BudgetLineCreate(BaseModel):
     currency: str = Field(min_length=3, max_length=3)
     amount_hc: float
     fx_rate: Optional[float] = None
-    description: Optional[str] = None
+    description: Optional[str] = Field(default=None, max_length=100)
 
 class BudgetCreate(BudgetBase):
     user_id: int
     lines: list[BudgetLineCreate]
 
-class BudgetUpdate(BaseModel):
-    name: Optional[str] = None
-    lines: Optional[list[BudgetLineCreate]] = None
+class BudgetLineUpsert(BaseModel):
+    id: Optional[int] = None
+    month: int = Field(ge=1, le=12)
+    account_id: int
+    amount_oc: float
+    currency: str = Field(min_length=3, max_length=3)
+    amount_hc: float
+    fx_rate: Optional[float] = None
+    description: Optional[str] = Field(default=None, max_length=100)
+
+class BudgetFullUpdate(BaseModel):
+    name: Optional[str] = Field(min_length=1, max_length=20)
+    year: Optional[int] = None
+    lines: list[BudgetLineUpsert]
 
 class BudgetLineOut(BudgetLineCreate):
     id: int
+    header_id: int
     model_config = ConfigDict(from_attributes=True)
 
 class BudgetOut(BudgetBase):
