@@ -17,15 +17,13 @@ BALANCE_ABS_TOL = 0.000001
 #--------------------------------
 # Helper functions
 #--------------------------------
-def _validate_unique_user(db: Session, name: str, email: str | None, exclude_id: int | None = None) -> None:
+def _validate_unique_user(db: Session, email: str | None, exclude_id: int | None = None) -> None:
     query = db.query(models.User)
-    q = query.filter(models.User.name == name)
-    if email is not None:
-        q = q.filter(models.User.email == email)
+    q = query.filter(models.User.email == email)
     if exclude_id is not None:
         q = q.filter(models.User.id != exclude_id)
     if q.first():
-        raise HTTPException(status_code=409, detail=f"User with name {name} or email {email} already exists")
+        raise HTTPException(status_code=409, detail=f"User with email {email} already exists")
 
 def _validate_unique_person(db: Session, user_id: int, name: str, is_me: bool, exclude_id: int | None = None) -> None:
     query = db.query(models.Person)
@@ -61,24 +59,50 @@ def _validate_unique_account(db: Session, user_id: int, name: str, type: models.
 
 def _validate_account_header(account: Union[schemas.AccountCreateIncomeExpense, schemas.AccountCreateAsset, schemas.AccountCreateLiability]) -> None:
     if account.type in [models.AccountType.asset, models.AccountType.liability]:
-        if account.currency is None:
+        if not hasattr(account, 'currency') or account.currency is None:
             raise HTTPException(status_code=400, detail="Currency is required for asset and liability accounts")
         if account.type == models.AccountType.asset:
-            if account.billing_day is not None:
+            if hasattr(account, 'billing_day') and account.billing_day is not None:
                 raise HTTPException(status_code=400, detail="Billing day should not be specified for asset accounts")
-            if account.due_day is not None:
+            if hasattr(account, 'due_day') and account.due_day is not None:
                 raise HTTPException(status_code=400, detail="Due day should not be specified for asset accounts")
     else:
-        if account.currency is not None:
+        if hasattr(account, 'currency') and account.currency is not None:
             raise HTTPException(status_code=400, detail="Currency should not be specified for non-asset and non-liability accounts")
-        if account.bank_name is not None:
+        if hasattr(account, 'bank_name') and account.bank_name is not None:
             raise HTTPException(status_code=400, detail="Bank name should not be specified for non-asset and non-liability accounts")
-        if account.opening_balance is None:
+        if hasattr(account, 'opening_balance') and account.opening_balance is not None:
             raise HTTPException(status_code=400, detail="Opening balance should not be specified for non-asset and non-liability accounts")
-        if account.billing_day is not None:
+        if hasattr(account, 'billing_day') and account.billing_day is not None:
             raise HTTPException(status_code=400, detail="Billing day should not be specified for non-asset and non-liability accounts")
-        if account.due_day is not None:
+        if hasattr(account, 'due_day') and account.due_day is not None:
             raise HTTPException(status_code=400, detail="Due day should not be specified for non-asset and non-liability accounts")
+
+def _validate_account_update(account: schemas.AccountUpdate, current_account: models.Account) -> None:
+    """Validate account update data against current account state."""
+    # If type is being changed, validate the new type requirements
+    if account.type is not None:
+        if account.type in [models.AccountType.asset, models.AccountType.liability]:
+            # For asset/liability accounts, currency is required
+            if account.currency is None and current_account.currency is None:
+                raise HTTPException(status_code=400, detail="Currency is required for asset and liability accounts")
+        else:
+            # For income/expense accounts, currency should not be specified
+            if account.currency is not None:
+                raise HTTPException(status_code=400, detail="Currency should not be specified for income and expense accounts")
+    
+    # Validate billing_day and due_day based on account type
+    final_type = account.type if account.type is not None else current_account.type
+    if final_type == models.AccountType.asset:
+        if account.billing_day is not None:
+            raise HTTPException(status_code=400, detail="Billing day should not be specified for asset accounts")
+        if account.due_day is not None:
+            raise HTTPException(status_code=400, detail="Due day should not be specified for asset accounts")
+    elif final_type in [models.AccountType.income, models.AccountType.expense]:
+        if account.billing_day is not None:
+            raise HTTPException(status_code=400, detail="Billing day should not be specified for income and expense accounts")
+        if account.due_day is not None:
+            raise HTTPException(status_code=400, detail="Due day should not be specified for income and expense accounts")
 
 def _validate_tx_header(tx: Union[schemas.TxCreate, schemas.TxCreateForex]) -> None:
     """
@@ -397,12 +421,16 @@ def get_user(db: Session, user_id: int) -> models.User | None:
     )
     return query.first()
 
+def get_user_any_status(db: Session, user_id: int) -> models.User | None:
+    """Get user by ID regardless of active status."""
+    return db.query(models.User).filter(models.User.id == user_id).first()
+
 def create_user(db: Session, user: schemas.UserCreate) -> models.User:
-    _validate_unique_user(db=db, name=user.name, email=user.email)
+    _validate_unique_user(db=db, email=user.email)
     db_user = models.User(
         name=user.name,
         email=user.email,
-        home_currency=user.home_currency
+        home_currency=user.home_currency.upper()
     )
     db.add(db_user)
     try:
@@ -417,8 +445,10 @@ def update_user(db: Session, user_id: int, user: schemas.UserUpdate) -> models.U
     db_user = get_user(db, user_id)
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
-    _validate_unique_user(db=db, name=user.name, email=user.email, exclude_id=user_id)
+    _validate_unique_user(db=db, email=user.email, exclude_id=user_id)
     for key, value in user.model_dump(exclude_unset=True).items():
+        if key == "home_currency" and value is not None:
+            value = value.upper()
         setattr(db_user, key, value)
     try:
         db.commit()
@@ -428,7 +458,7 @@ def update_user(db: Session, user_id: int, user: schemas.UserUpdate) -> models.U
     db.refresh(db_user)
     return db_user
 
-def deactivate_user(db: Session, user_id: int) -> models.User:
+def deactivate_user(db: Session, user_id: int) -> None:
     db_user = get_user(db, user_id)
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -438,18 +468,16 @@ def deactivate_user(db: Session, user_id: int) -> models.User:
     db_user.active = False
     db_user.deleted_at = datetime.now()
     db.commit()
-    db.refresh(db_user)
-    return db_user
 
-def activate_user(db: Session, user_id: int) -> models.User:
-    db_user = get_user(db, user_id)
+def activate_user(db: Session, user_id: int) -> None:
+    db_user = get_user_any_status(db, user_id)
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
+    if db_user.active:
+        raise HTTPException(status_code=404, detail="User not found")  # Already active, treat as not found
     db_user.active = True
     db_user.deleted_at = None
     db.commit()
-    db.refresh(db_user)
-    return db_user
 
 #--------------------------------
 # People
@@ -463,6 +491,10 @@ def get_people(db: Session, user_id: int, person_ids: list[int] | None = None) -
         query = query.filter(models.Person.id.in_(person_ids))
     return query.all()
 
+def get_all_people(db: Session) -> list[models.Person]:
+    """Get all active people regardless of user."""
+    return db.query(models.Person).filter(models.Person.active == True).all()
+
 def get_person(db: Session, user_id: int, person_id: int) -> models.Person | None:
     query = db.query(models.Person).filter(
         models.Person.user_id == user_id,
@@ -470,6 +502,17 @@ def get_person(db: Session, user_id: int, person_id: int) -> models.Person | Non
         models.Person.active == True
     )
     return query.first()
+
+def get_person_any_status(db: Session, person_id: int) -> models.Person | None:
+    """Get person by ID regardless of active status."""
+    return db.query(models.Person).filter(models.Person.id == person_id).first()
+
+def get_person_by_id(db: Session, person_id: int) -> models.Person | None:
+    """Get active person by ID regardless of user."""
+    return db.query(models.Person).filter(
+        models.Person.id == person_id,
+        models.Person.active == True
+    ).first()
 
 def create_person(db: Session, person: schemas.PersonCreate) -> models.Person:
     _validate_unique_person(db=db, user_id=person.user_id, name=person.name, is_me=person.is_me)
@@ -502,6 +545,22 @@ def update_person(db: Session, user_id: int, person_id: int, person: schemas.Per
     db.refresh(db_person)
     return db_person
 
+def update_person_by_id(db: Session, person_id: int, person: schemas.PersonUpdate) -> models.Person:
+    """Update person by ID regardless of user."""
+    db_person = get_person_by_id(db, person_id)
+    if not db_person:
+        raise HTTPException(status_code=404, detail="Person not found")
+    _validate_unique_person(db=db, user_id=db_person.user_id, name=person.name, is_me=person.is_me, exclude_id=person_id)
+    for key, value in person.model_dump(exclude_unset=True).items():
+        setattr(db_person, key, value)
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=f"Constraint violation: {e.orig}")
+    db.refresh(db_person)
+    return db_person
+
 def deactivate_person(db: Session, user_id: int, person_id: int) -> models.Person:
     db_person = get_person(db=db, user_id=user_id, person_id=person_id)
     if not db_person:
@@ -513,9 +572,11 @@ def deactivate_person(db: Session, user_id: int, person_id: int) -> models.Perso
     return db_person
 
 def activate_person(db: Session, user_id: int, person_id: int) -> models.Person:
-    db_person = get_person(db=db, user_id=user_id, person_id=person_id)
+    db_person = get_person_any_status(db=db, person_id=person_id)
     if not db_person:
         raise HTTPException(status_code=404, detail="Person not found")
+    if db_person.active:
+        raise HTTPException(status_code=404, detail="Person not found")  # Already active, treat as not found
     db_person.active = True
     db_person.deleted_at = None
     db.commit()
@@ -540,6 +601,13 @@ def get_account(db: Session, user_id: int, account_id: int) -> models.Account | 
         models.Account.active == True
     )
     return query.first()
+
+def get_account_any_status(db: Session, user_id: int, account_id: int) -> models.Account | None:
+    """Get account by ID regardless of active status."""
+    return db.query(models.Account).filter(
+        models.Account.user_id == user_id,
+        models.Account.id == account_id
+    ).first()
 
 def create_account(db: Session, account: Union[schemas.AccountCreateIncomeExpense, schemas.AccountCreateAsset, schemas.AccountCreateLiability]) -> models.Account:
     # Validations
@@ -573,7 +641,7 @@ def update_account(db: Session, user_id: int, account_id: int, account: schemas.
     if not db_account:
         raise HTTPException(status_code=404, detail="Account not found")
     _validate_unique_account(db=db, user_id=user_id, name=account.name, type=account.type, exclude_id=account_id)
-    _validate_account_header(account=account)
+    _validate_account_update(account=account, current_account=db_account)
 
     for key, value in account.model_dump(exclude_unset=True).items():
         setattr(db_account, key, value)
@@ -597,9 +665,11 @@ def deactivate_account(db: Session, user_id: int, account_id: int) -> models.Acc
     return db_account
 
 def activate_account(db: Session, user_id: int, account_id: int) -> models.Account:
-    db_account = get_account(db=db, user_id=user_id, account_id=account_id)
+    db_account = get_account_any_status(db=db, user_id=user_id, account_id=account_id)
     if not db_account:
         raise HTTPException(status_code=404, detail="Account not found")
+    if db_account.active:
+        raise HTTPException(status_code=404, detail="Account not found")  # Already active, treat as not found
     db_account.active = True
     db_account.deleted_at = None
     db.commit()
@@ -807,66 +877,129 @@ def get_split(db: Session, split_id: int) -> models.TxSplit | None:
 #--------------------------------
 # Budget
 #--------------------------------
-def get_monthly_budget(db: Session, user_id: int, budget_id: int, year: int, month: int) -> models.Budget | None:
-    query = db.query(models.Budget).filter(
-        models.Budget.id == budget_id,
-        models.Budget.user_id == user_id,
-        models.Budget.year == year,
-        models.Budget.month == month
+def get_budget_month(db: Session, user_id: int, budget_id: int, month: int) -> list[models.BudgetLine] | None:
+    query = db.query(models.BudgetLine).join(models.BudgetHeader).filter(
+        models.BudgetHeader.id == budget_id,
+        models.BudgetHeader.user_id == user_id,
+        models.BudgetLine.month == month
     )
-    return query.first()
+    return query.all()
 
-def get_annual_budget(db: Session, user_id: int, budget_id: int, year: int) -> models.Budget | None:
-    query = db.query(models.Budget).filter(
-        models.Budget.id == budget_id,
-        models.Budget.user_id == user_id,
-        models.Budget.year == year
+def get_budget(db: Session, user_id: int, budget_id: int) -> list[models.BudgetLine] | None:
+    "Get all the lines for a given budget"
+
+    query = db.query(models.BudgetLine).join(models.BudgetHeader).filter(
+        models.BudgetHeader.id == budget_id,
+        models.BudgetHeader.user_id == user_id
     )
-    return query.first()
+    return query.all()
 
-def create_annual_budget(db: Session, user_id: int, budget: schemas.BudgetCreate) -> models.Budget:
-    # Validate currency is the same as the account currency
-    account = get_account(db, user_id, budget.account_id)
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-    if account.currency != budget.currency:
-        raise HTTPException(status_code=400, detail="Currency mismatch between account and budget")
-    db_budget = models.Budget(
+def create_budget(db: Session, user_id: int, budget: schemas.BudgetCreate) -> models.BudgetHeader:
+
+    # Validate that all accounts exist and currencies match
+    for line in budget.lines:
+        account = get_account(db, user_id, line.account_id)
+        if not account:
+            raise HTTPException(status_code=404, detail=f"Account {line.account_id} not found")
+        if account.currency != line.currency:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Currency mismatch: account {account.name} uses {account.currency}, but budget line specifies {line.currency}"
+            )
+
+    # Create budget header
+    db_budget_header = models.BudgetHeader(
         name=budget.name,
         year=budget.year,
-        month=budget.month,
-        amount_oc=budget.amount_oc,
-        currency=budget.currency,
-        amount_hc=budget.amount_hc,
-        fx_rate=budget.fx_rate,
-        description=budget.description,
-        user_id=user_id,
-        account_id=account.id
+        user_id=user_id
     )
-    db.add(db_budget)
+    db.add(db_budget_header)
+
+    try:
+        db.flush()
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=f"Constraint violation: {e.orig}")
+    
+    # Create budget lines
+    budget_lines = []
+    for line in budget.lines:
+        db_budget_line = models.BudgetLine(
+            month=line.month,
+            amount_oc=line.amount_oc,
+            currency=line.currency,
+            amount_hc=line.amount_hc,
+            fx_rate=line.fx_rate,
+            description=line.description,
+            header_id=db_budget_header.id,
+            account_id=line.account_id
+        )
+        db.add(db_budget_line)
+        budget_lines.append(db_budget_line)
+
     try:
         db.commit()
     except IntegrityError as e:
         db.rollback()
         raise HTTPException(status_code=409, detail=f"Constraint violation: {e.orig}")
-    db.refresh(db_budget)
-    return db_budget
 
-def update_annual_budget(db: Session, user_id: int, budget_id: int, budget: schemas.BudgetUpdate) -> models.Budget:
-    db_budget = get_annual_budget(db, user_id, budget_id)
-    if not db_budget:
+    db.refresh(db_budget_header)
+    return db_budget_header
+
+def update_budget(db: Session, user_id: int, budget_id: int, budget: schemas.BudgetUpdate) -> models.BudgetHeader:
+    
+    # Get the existing budget header
+    db_budget_header = get_budget(db, user_id, budget_id)
+    if not db_budget_header:
         raise HTTPException(status_code=404, detail="Budget not found")
-    for key, value in budget.model_dump(exclude_unset=True).items():
-        setattr(db_budget, key, value)
+    
+    # Update header fields if provided
+    if budget.name is not None:
+        db_budget_header.name = budget.name
+    if budget.year is not None:
+        db_budget_header.year = budget.year
+    
+    # Validate all accounts and currencies for the lines
+    for line in budget.lines:
+        account = get_account(db, user_id, line.account_id)
+        if not account:
+            raise HTTPException(status_code=404, detail=f"Account {line.account_id} not found")
+        if account.currency != line.currency:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Currency mismatch: account {account.name} uses {account.currency}, but budget line specifies {line.currency}"
+            )
+    
+    # Handle budget lines - this is a full replacement approach
+    # First, delete existing lines
+    db.query(models.BudgetLine).filter(
+        models.BudgetLine.header_id == budget_id
+    ).delete()
+    
+    # Create new budget lines
+    for line in budget.lines:
+        db_budget_line = models.BudgetLine(
+            month=line.month,
+            amount_oc=line.amount_oc,
+            currency=line.currency,
+            amount_hc=line.amount_hc,
+            fx_rate=line.fx_rate,
+            description=line.description,
+            header_id=db_budget_header.id,
+            account_id=line.account_id
+        )
+        db.add(db_budget_line)
+    
     try:
         db.commit()
     except IntegrityError as e:
         db.rollback()
         raise HTTPException(status_code=409, detail=f"Constraint violation: {e.orig}")
-    db.refresh(db_budget)
-    return db_budget
+    
+    db.refresh(db_budget_header)
+    return db_budget_header
 
-def delete_annual_budget(db: Session, id: int) -> None:
+def delete_budget(db: Session, id: int) -> None:
     db_budget = get_annual_budget(db, id)
     if not db_budget:
         raise HTTPException(status_code=404, detail="Budget not found")

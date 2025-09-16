@@ -13,14 +13,14 @@ def create_budget(budget: schemas.BudgetCreate, db: Session = Depends(get_db)):
 # Get monthly budget
 @router.get("/{id}/{month}", response_model=schemas.BudgetOut)
 def get_budget(id: int, month: int, db: Session = Depends(get_db)):
-    return crud.get_budget(db, id, month)
+    return crud.get_budget_month(db, id, month)
 
-# Get annual budget
+# Get budget
 @router.get("/{id}", response_model=schemas.BudgetOut)
-def get_annual_budget(id: int, db: Session = Depends(get_db)):
-    return crud.get_annual_budget(db, id)
+def get_budget(id: int, db: Session = Depends(get_db)):
+    return crud.get_budget(db, id)
 
-# Update a yearly budget
+# Update a budget
 @router.patch("/{id}", response_model=schemas.BudgetUpdate)
 def update_budget(id: int, budget: schemas.BudgetUpdate, db: Session = Depends(get_db)):
     return crud.update_budget(db, id, budget)

@@ -18,7 +18,11 @@ def get_users(db: Session = Depends(get_db)):
 # Get a user
 @router.get("/{user_id}", response_model=schemas.UserOut)
 def get_user(user_id: int, db: Session = Depends(get_db)):
-    return crud.get_user(db, user_id)
+    user = crud.get_user(db, user_id)
+    if not user:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
 
 # Update a user
 @router.patch("/{user_id}", response_model=schemas.UserOut)
@@ -28,9 +32,11 @@ def update_user(user_id: int, user: schemas.UserUpdate, db: Session = Depends(ge
 # Deactivate a user
 @router.patch("/{user_id}/deactivate", status_code=204)
 def deactivate_user(user_id: int, db: Session = Depends(get_db)):
-    return crud.deactivate_user(db, user_id)
+    crud.deactivate_user(db, user_id)
+    return None
 
 # Activate a user
 @router.patch("/{user_id}/activate", status_code=204)
 def activate_user(user_id: int, db: Session = Depends(get_db)):
-    return crud.activate_user(db, user_id)
+    crud.activate_user(db, user_id)
+    return None

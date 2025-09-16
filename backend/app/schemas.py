@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, EmailStr
 
 from .models import AccountType, TxSource, TxType
 
@@ -10,16 +10,16 @@ from .models import AccountType, TxSource, TxType
 #--------------------------------
 class UserBase(BaseModel):
     name: str = Field(min_length=1, max_length=100)
-    email: Optional[str] = None
+    email: EmailStr = Field(max_length=255)
     home_currency: str = Field(min_length=3, max_length=3)
 
 class UserCreate(UserBase):
     pass
 
 class UserUpdate(BaseModel):
-    name: Optional[str] = Field(min_length=1, max_length=100)
-    email: Optional[str] = None
-    home_currency: Optional[str] = Field(min_length=3, max_length=3)
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    email: Optional[EmailStr] = Field(None, max_length=255)
+    home_currency: Optional[str] = Field(None, min_length=3, max_length=3)
 
 class UserOut(UserBase):
     id: int
@@ -65,16 +65,21 @@ class AccountCreateLiability(AccountCreateAsset):
     due_day: Optional[int] = None
 
 class AccountUpdate(BaseModel):
-    name: Optional[str] = Field(min_length=1, max_length=100)
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
     type: Optional[AccountType] = None
-    currency: Optional[str] = Field(min_length=3, max_length=3)
+    currency: Optional[str] = Field(None, min_length=3, max_length=3)
     bank_name: Optional[str] = None
-    opening_balance: Optional[float] = Field(ge=0.0)
+    opening_balance: Optional[float] = Field(None, ge=0.0)
     billing_day: Optional[int] = None
     due_day: Optional[int] = None
 
 class AccountOut(AccountBase):
     id: int
+    currency: Optional[str] = None
+    bank_name: Optional[str] = None
+    opening_balance: Optional[float] = None
+    billing_day: Optional[int] = None
+    due_day: Optional[int] = None
     model_config = ConfigDict(from_attributes=True)
 
 #--------------------------------
@@ -208,7 +213,7 @@ class BudgetLineUpsert(BaseModel):
     fx_rate: Optional[float] = None
     description: Optional[str] = Field(default=None, max_length=100)
 
-class BudgetFullUpdate(BaseModel):
+class BudgetUpdate(BaseModel):
     name: Optional[str] = Field(min_length=1, max_length=20)
     year: Optional[int] = None
     lines: list[BudgetLineUpsert]
