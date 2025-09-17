@@ -12,8 +12,8 @@ from .users import (
 )
 
 from .people import (
-    get_people, get_all_people, get_person, get_person_any_status, get_person_by_id,
-    create_person, update_person, update_person_by_id, deactivate_person, activate_person
+    get_people, get_person, get_person_any_status,
+    create_person, update_person, deactivate_person, activate_person
 )
 
 from .accounts import (
@@ -48,8 +48,8 @@ __all__ = [
     "deactivate_user", "activate_user",
     
     # People
-    "get_people", "get_all_people", "get_person", "get_person_any_status", "get_person_by_id",
-    "create_person", "update_person", "update_person_by_id", "deactivate_person", "activate_person",
+    "get_people", "get_person", "get_person_any_status",
+    "create_person", "update_person", "deactivate_person", "activate_person",
     
     # Accounts
     "get_accounts", "get_account", "get_account_any_status", "create_account", 

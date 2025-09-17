@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from typing import Union
 
 from .. import models, schemas
-from .common import _validate_tx_header, _build_postings_from_tx_input, _validate_and_complete_postings, _derive_transaction_primary_fields
+from .common import _validate_tx_header, _build_postings_from_tx_input, _validate_and_complete_postings
 
 def get_transactions(db: Session, user_id: int = None, skip: int = 0, limit: int = 50, date_from: str = None, date_to: str = None, account_id: int = None, category_id: int = None, payer_person_id: int = None) -> list[models.Transaction]:
     """Get all active transactions for a user with pagination."""

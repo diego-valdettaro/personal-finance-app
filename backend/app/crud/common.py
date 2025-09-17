@@ -1,10 +1,8 @@
 """
 Common utilities and validation functions for CRUD operations.
 """
-from datetime import datetime, date
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from math import isfinite, isclose
 from typing import Union
 
 from .. import models, schemas
@@ -68,15 +66,15 @@ def _validate_account_header(account: Union[schemas.AccountCreateIncomeExpense, 
                 raise HTTPException(status_code=400, detail="Due day should not be specified for asset accounts")
     else:
         if hasattr(account, 'currency') and account.currency is not None:
-            raise HTTPException(status_code=400, detail="Currency should not be specified for non-asset and non-liability accounts")
+            raise HTTPException(status_code=400, detail="Currency should not be specified for income and expense accounts")
         if hasattr(account, 'bank_name') and account.bank_name is not None:
-            raise HTTPException(status_code=400, detail="Bank name should not be specified for non-asset and non-liability accounts")
+            raise HTTPException(status_code=400, detail="Bank name should not be specified for income and expense accounts")
         if hasattr(account, 'opening_balance') and account.opening_balance is not None:
-            raise HTTPException(status_code=400, detail="Opening balance should not be specified for non-asset and non-liability accounts")
+            raise HTTPException(status_code=400, detail="Opening balance should not be specified for income and expense accounts")
         if hasattr(account, 'billing_day') and account.billing_day is not None:
-            raise HTTPException(status_code=400, detail="Billing day should not be specified for non-asset and non-liability accounts")
+            raise HTTPException(status_code=400, detail="Billing day should not be specified for income and expense accounts")
         if hasattr(account, 'due_day') and account.due_day is not None:
-            raise HTTPException(status_code=400, detail="Due day should not be specified for non-asset and non-liability accounts")
+            raise HTTPException(status_code=400, detail="Due day should not be specified for income and expense accounts")
 
 def _validate_account_update(account: schemas.AccountUpdate, current_account: models.Account) -> None:
     """Validate account update data against current account state."""
@@ -91,7 +89,7 @@ def _validate_account_update(account: schemas.AccountUpdate, current_account: mo
             if account.currency is not None:
                 raise HTTPException(status_code=400, detail="Currency should not be specified for income and expense accounts")
     
-    # Validate billing_day and due_day based on account type
+    # Validate fields based on final account type
     final_type = account.type if account.type is not None else current_account.type
     if final_type == models.AccountType.asset:
         if account.billing_day is not None:
@@ -99,6 +97,12 @@ def _validate_account_update(account: schemas.AccountUpdate, current_account: mo
         if account.due_day is not None:
             raise HTTPException(status_code=400, detail="Due day should not be specified for asset accounts")
     elif final_type in [models.AccountType.income, models.AccountType.expense]:
+        if account.currency is not None:
+            raise HTTPException(status_code=400, detail="Currency should not be specified for income and expense accounts")
+        if account.bank_name is not None:
+            raise HTTPException(status_code=400, detail="Bank name should not be specified for income and expense accounts")
+        if account.opening_balance is not None:
+            raise HTTPException(status_code=400, detail="Opening balance should not be specified for income and expense accounts")
         if account.billing_day is not None:
             raise HTTPException(status_code=400, detail="Billing day should not be specified for income and expense accounts")
         if account.due_day is not None:
@@ -223,49 +227,3 @@ def _validate_and_complete_postings(db: Session, transaction: models.Transaction
     
     return completed_postings
 
-def _derive_transaction_primary_fields(db: Session, transaction: models.Transaction, completed_postings: list[models.TxPosting]) -> tuple[float, float, str]:
-    """Derive primary transaction fields from postings."""
-    total_amount = 0.0
-    total_amount_home = 0.0
-    primary_currency = None
-    
-    for posting in completed_postings:
-        account = db.query(models.Account).filter(models.Account.id == posting.account_id).first()
-        if not account:
-            continue
-            
-        # Get user's home currency
-        user = db.query(models.User).filter(models.User.id == account.user_id).first()
-        if not user:
-            continue
-            
-        if primary_currency is None:
-            primary_currency = user.home_currency
-        
-        # Calculate amount multiplier based on transaction type and account type
-        multiplier = _get_amount_multiplier(transaction.type, account.type, completed_postings.index(posting))
-        amount = posting.amount_oc * multiplier
-        
-        total_amount += amount
-        
-        # Convert to home currency if needed
-        if posting.currency != user.home_currency:
-            # For now, assume 1:1 conversion (in real app, would use FX rates)
-            total_amount_home += amount
-        else:
-            total_amount_home += amount
-    
-    return total_amount, total_amount_home, primary_currency
-
-def _get_amount_multiplier(tx_type: models.TxType, account_type: models.AccountType, posting_index: int) -> float:
-    """Get amount multiplier for posting based on transaction type and account type."""
-    if tx_type == models.TxType.forex:
-        return 1.0 if posting_index == 0 else 1.0  # Both postings are positive for forex
-    elif tx_type == models.TxType.transfer:
-        return 1.0 if account_type in [models.AccountType.asset, models.AccountType.liability] else -1.0
-    elif tx_type == models.TxType.income:
-        return 1.0 if account_type == models.AccountType.income else -1.0
-    elif tx_type == models.TxType.expense:
-        return 1.0 if account_type == models.AccountType.expense else -1.0
-    else:
-        return 1.0
