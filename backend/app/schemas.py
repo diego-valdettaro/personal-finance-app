@@ -37,7 +37,7 @@ class PersonCreate(PersonBase):
     user_id: int
 
 class PersonUpdate(BaseModel):
-    name: Optional[str] = Field(min_length=1, max_length=100)
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
     is_me: Optional[bool] = None
 
 class PersonOut(PersonBase):
@@ -53,16 +53,17 @@ class AccountBase(BaseModel):
 
 class AccountCreateIncomeExpense(AccountBase):
     user_id: int
+    model_config = ConfigDict(extra="forbid")
 
 class AccountCreateAsset(AccountBase):
     user_id: int
     currency: str = Field(min_length=3, max_length=3)
     bank_name: Optional[str] = None
-    opening_balance: Optional[float] = Field(ge=0.0)
+    opening_balance: Optional[float] = Field(None, ge=0.0)
 
 class AccountCreateLiability(AccountCreateAsset):
-    billing_day: Optional[int] = None
-    due_day: Optional[int] = None
+    billing_day: Optional[int] = Field(None, ge=1, le=31)
+    due_day: Optional[int] = Field(None, ge=1, le=31)
 
 class AccountUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
@@ -175,6 +176,7 @@ class TxUpdate(BaseModel):
 
 class TxOut(TxBase):
     id: int
+    active: bool
 
     # Derived values from the first posting
     tx_amount_hc: float
