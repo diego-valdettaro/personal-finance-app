@@ -14,7 +14,7 @@ class UserBase(BaseModel):
     home_currency: str = Field(min_length=3, max_length=3)
 
 class UserCreate(UserBase):
-    pass
+    password: str = Field(min_length=8, max_length=100)
 
 class UserUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
@@ -190,7 +190,7 @@ class TxOut(TxBase):
 #--------------------------------
 class BudgetBase(BaseModel):
     name: str = Field(min_length=1, max_length=20)
-    year: int
+    year: int = Field(ge=2000, le=2100)
 
 class BudgetLineCreate(BaseModel):
     month: int = Field(ge=1, le=12)
@@ -216,9 +216,9 @@ class BudgetLineUpsert(BaseModel):
     description: Optional[str] = Field(default=None, max_length=100)
 
 class BudgetUpdate(BaseModel):
-    name: Optional[str] = Field(min_length=1, max_length=20)
-    year: Optional[int] = None
-    lines: list[BudgetLineUpsert]
+    name: Optional[str] = Field(None, min_length=1, max_length=20)
+    year: Optional[int] = Field(None, ge=2000, le=2100)
+    lines: Optional[list[BudgetLineUpsert]] = None
 
 class BudgetLineOut(BudgetLineCreate):
     id: int
@@ -227,7 +227,7 @@ class BudgetLineOut(BudgetLineCreate):
 
 class BudgetOut(BudgetBase):
     id: int
-    lines: list[BudgetLineOut] = Field(default_factory=list)
+    lines: list[BudgetLineOut] = Field(alias="budget_lines", default_factory=list)
     model_config = ConfigDict(from_attributes=True)
 
 #--------------------------------
@@ -252,3 +252,38 @@ class ReportDebt(BaseModel):
     debt: float
     # If debt is 0, the person is not active
     is_active: bool
+
+#--------------------------------
+# Split Schemas
+#--------------------------------
+class TxSplitBase(BaseModel):
+    person_id: int
+    share_amount: float = Field(gt=0.0)
+
+class TxSplitCreate(TxSplitBase):
+    pass
+
+class TxSplitUpdate(TxSplitBase):
+    person_id: Optional[int] = None
+    share_amount: Optional[float] = Field(None, gt=0.0)
+
+class TxSplitOut(TxSplitBase):
+    id: int
+    tx_id: int
+    active: bool
+    deleted_at: Optional[datetime] = None
+    model_config = ConfigDict(from_attributes=True)
+
+class TxSplitValidation(BaseModel):
+    """Schema for validating split amounts against transaction amount"""
+    transaction_amount: float
+    total_split_amount: float
+    is_valid: bool
+    difference: float
+
+#--------------------------------
+# Auth Schemas
+#--------------------------------
+class Token(BaseModel):
+    access_token: str
+    token_type: str

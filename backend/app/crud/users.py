@@ -24,6 +24,10 @@ def get_user_any_status(db: Session, user_id: int) -> models.User | None:
     """Get a user by ID regardless of active status."""
     return db.query(models.User).filter(models.User.id == user_id).first()
 
+def get_user_by_email(db: Session, email: str) -> models.User | None:
+    """Get a user by email."""
+    return db.query(models.User).filter(models.User.email == email, models.User.active == True).first()
+
 def create_user(db: Session, user: schemas.UserCreate) -> models.User:
     """Create a new user."""
     # Validate unique email
@@ -32,9 +36,14 @@ def create_user(db: Session, user: schemas.UserCreate) -> models.User:
     # Normalize currency to uppercase
     currency = user.home_currency.upper() if user.home_currency else None
     
+    # Hash password
+    from ..auth import get_password_hash
+    hashed_password = get_password_hash(user.password)
+    
     db_user = models.User(
         name=user.name,
         email=user.email,
+        hashed_password=hashed_password,
         home_currency=currency
     )
     db.add(db_user)

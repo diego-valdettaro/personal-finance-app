@@ -1,26 +1,51 @@
-import React from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
-import Layout from './components/Layout';
-import DashboardPage from './pages/DashboardPage';
-import ManagementPage from './pages/ManagementPage';
-import TransactionsPage from './pages/TransactionsPage';
-import ExpensesPage from './pages/ExpensesPage';
-import DebtsPage from './pages/DebtsPage';
-import BudgetPage from './pages/BudgetPage';
+import { QueryClientProvider } from "@tanstack/react-query"
+import { ReactQueryDevtools } from "@tanstack/react-query-devtools"
+import { BrowserRouter as Router } from "react-router-dom"
+import { queryClient } from "./lib/query-client"
+import { AppShell } from "./components/AppShell"
+import { Toaster } from "./components/ui/toaster"
+import { ThemeProvider } from "./components/ThemeProvider"
+import { AuthProvider } from "./contexts/AuthContext"
+import { useAuth } from "./hooks/useAuth"
+import { LandingPage } from "./pages/LandingPage"
+import "./index.css"
 
-export default function App() {
+function AppContent() {
+  const { isAuthenticated, isLoading } = useAuth()
+
+  if (isLoading) {
     return (
-        <Routes>
-            <Route path="/" element={<Layout />}>
-                <Route index element={<Navigate to="/dashboard" />} />
-                <Route path="dashboard" element={<DashboardPage />} />
-                <Route path="management" element={<ManagementPage />} />
-                <Route path="transactions" element={<TransactionsPage />} />
-                <Route path="expenses" element={<ExpensesPage />} />
-                <Route path="debts" element={<DebtsPage />} />
-                <Route path="budget" element={<BudgetPage />} />
-            </Route>
-            <Route path="*" element={<Navigate to="/dashboard" />} />
-        </Routes>
-    );
+      <div className="min-h-screen bg-background text-foreground flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    )
+  }
+
+  if (!isAuthenticated) {
+    return <LandingPage />
+  }
+
+  return (
+    <div className="min-h-screen bg-background text-foreground">
+      <AppShell />
+      <Toaster />
+    </div>
+  )
 }
+
+function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <AuthProvider>
+          <Router>
+            <AppContent />
+          </Router>
+        </AuthProvider>
+      </ThemeProvider>
+      <ReactQueryDevtools initialIsOpen={false} />
+    </QueryClientProvider>
+  )
+}
+
+export default App

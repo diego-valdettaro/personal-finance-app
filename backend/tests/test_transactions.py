@@ -1,11 +1,9 @@
 """
 Test cases for transaction functionality in the finance app backend.
 """
+from app import models
 
 import pytest
-from fastapi.testclient import TestClient
-from datetime import datetime, date
-from app import models, schemas
 from app.crud import postings, splits
 
 class TestTransactionCreation:
@@ -23,7 +21,7 @@ class TestTransactionCreation:
             "account_id_primary": sample_accounts["income"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         if response.status_code != 200:
             print(f"Response status: {response.status_code}")
             print(f"Response content: {response.text}")
@@ -68,7 +66,7 @@ class TestTransactionCreation:
             "account_id_primary": sample_accounts["expense"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         data = response.json()
         assert data["type"] == transaction_data["type"]
@@ -107,7 +105,7 @@ class TestTransactionCreation:
             "account_id_primary": sample_accounts["checking_account"].id,
             "account_id_secondary": sample_accounts["savings_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         data = response.json()
         assert data["type"] == transaction_data["type"]
@@ -147,7 +145,7 @@ class TestTransactionCreation:
             "account_id_primary": sample_accounts["checking_account"].id,
             "account_id_secondary": sample_accounts["eur_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         data = response.json()
         assert data["type"] == transaction_data["type"]
@@ -192,7 +190,7 @@ class TestTransactionCreation:
             "account_id_primary": sample_accounts["credit_card"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         data = response.json()
         assert data["type"] == transaction_data["type"]
@@ -221,7 +219,7 @@ class TestTransactionCreation:
     def test_create_transaction_missing_required_fields(self, client, db_session, sample_user):
         """Test transaction creation with missing required fields."""
         # Missing user_id
-        response = client.post("/transactions/", json={
+        response = client.post(f"/users/{sample_user.id}/transactions/", json={
             "date": "2024-01-15T10:00:00",
             "type": "income",
             "amount_oc_primary": 1000.00,
@@ -232,7 +230,7 @@ class TestTransactionCreation:
         assert response.status_code == 422
         
         # Missing date
-        response = client.post("/transactions/", json={
+        response = client.post(f"/users/{sample_user.id}/transactions/", json={
             "user_id": sample_user.id,
             "type": "income",
             "amount_oc_primary": 1000.00,
@@ -243,7 +241,7 @@ class TestTransactionCreation:
         assert response.status_code == 422
         
         # Missing type
-        response = client.post("/transactions/", json={
+        response = client.post(f"/users/{sample_user.id}/transactions/", json={
             "user_id": sample_user.id,
             "date": "2024-01-15T10:00:00",
             "amount_oc_primary": 1000.00,
@@ -264,7 +262,7 @@ class TestTransactionCreation:
             "account_id_primary": sample_accounts["asset"].id,
             "account_id_secondary": sample_accounts["income"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 422
     
     def test_create_transaction_invalid_currency(self, client, db_session, sample_user, sample_accounts):
@@ -278,7 +276,7 @@ class TestTransactionCreation:
             "account_id_primary": sample_accounts["asset"].id,
             "account_id_secondary": sample_accounts["income"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 422
     
     def test_create_transaction_negative_amount(self, client, db_session, sample_user, sample_accounts):
@@ -293,7 +291,7 @@ class TestTransactionCreation:
             "account_id_primary": sample_accounts["income"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         # The database constraint prevents negative amounts, causing a 400 error
         assert response.status_code == 400
     
@@ -308,7 +306,7 @@ class TestTransactionCreation:
             "account_id_primary": 99999,
             "account_id_secondary": 99998
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 404  # Account not found
 
 class TestGetTransactions:
@@ -316,13 +314,13 @@ class TestGetTransactions:
     
     def test_get_all_transactions_empty(self, client, db_session, sample_user):
         """Test getting all transactions when no transactions exist."""
-        response = client.get("/transactions/")
+        response = client.get(f"/users/{sample_user.id}/transactions/")
         assert response.status_code == 200
         assert response.json() == []
     
     def test_get_all_transactions_multiple(self, client, db_session, sample_user, sample_transactions):
         """Test getting all transactions when multiple transactions exist."""
-        response = client.get("/transactions/")
+        response = client.get(f"/users/{sample_user.id}/transactions/")
         assert response.status_code == 200
         transactions = response.json()
         assert len(transactions) == 3  # Based on sample_transactions fixture
@@ -330,19 +328,19 @@ class TestGetTransactions:
     def test_get_transactions_with_filters(self, client, db_session, sample_user, sample_transactions, sample_accounts):
         """Test getting transactions with various filters."""
         # Filter by account
-        response = client.get(f"/transactions/?account_id={sample_accounts['asset'].id}")
+        response = client.get(f"/users/{sample_user.id}/transactions/?account_id={sample_accounts['asset'].id}")
         assert response.status_code == 200
         transactions = response.json()
         assert len(transactions) >= 1
         
         # Filter by date range
-        response = client.get("/transactions/?date_from=2024-01-01&date_to=2024-01-31")
+        response = client.get(f"/users/{sample_user.id}/transactions/?date_from=2024-01-01&date_to=2024-01-31")
         assert response.status_code == 200
         transactions = response.json()
         assert len(transactions) >= 1
         
         # Filter by type
-        response = client.get("/transactions/?type=income")
+        response = client.get(f"/users/{sample_user.id}/transactions/?type=income")
         assert response.status_code == 200
         transactions = response.json()
         # Note: This would need to be implemented in the router if not already
@@ -350,7 +348,7 @@ class TestGetTransactions:
     def test_get_transaction_success(self, client, db_session, sample_user, sample_transactions):
         """Test getting a specific transaction by ID."""
         transaction = sample_transactions[0]
-        response = client.get(f"/transactions/{transaction.id}")
+        response = client.get(f"/users/{sample_user.id}/transactions/{transaction.id}")
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == transaction.id
@@ -359,7 +357,7 @@ class TestGetTransactions:
     
     def test_get_transaction_not_found(self, client, db_session, sample_user):
         """Test getting a non-existent transaction."""
-        response = client.get("/transactions/99999")
+        response = client.get(f"/users/{sample_user.id}/transactions/99999")
         assert response.status_code == 404
 
 class TestUpdateTransaction:
@@ -369,7 +367,7 @@ class TestUpdateTransaction:
         """Test updating only the transaction description."""
         transaction = sample_transactions[0]
         update_data = {"description": "Updated description"}
-        response = client.patch(f"/transactions/{transaction.id}", json=update_data)
+        response = client.patch(f"/users/{sample_user.id}/transactions/{transaction.id}", json=update_data)
         assert response.status_code == 200
         data = response.json()
         assert data["description"] == "Updated description"
@@ -379,7 +377,7 @@ class TestUpdateTransaction:
         """Test updating transaction amount."""
         transaction = sample_transactions[0]
         update_data = {"amount_oc_primary": 2000.00}
-        response = client.patch(f"/transactions/{transaction.id}", json=update_data)
+        response = client.patch(f"/users/{sample_user.id}/transactions/{transaction.id}", json=update_data)
         assert response.status_code == 200
         data = response.json()
         assert data["amount_oc_primary"] == 2000.00
@@ -388,7 +386,7 @@ class TestUpdateTransaction:
         """Test updating transaction type."""
         transaction = sample_transactions[0]
         update_data = {"type": "expense"}
-        response = client.patch(f"/transactions/{transaction.id}", json=update_data)
+        response = client.patch(f"/users/{sample_user.id}/transactions/{transaction.id}", json=update_data)
         assert response.status_code == 200
         data = response.json()
         assert data["type"] == "expense"
@@ -398,7 +396,7 @@ class TestUpdateTransaction:
         transaction = sample_transactions[0]
         new_date = "2024-02-15T14:30:00"
         update_data = {"date": new_date}
-        response = client.patch(f"/transactions/{transaction.id}", json=update_data)
+        response = client.patch(f"/users/{sample_user.id}/transactions/{transaction.id}", json=update_data)
         assert response.status_code == 200
         data = response.json()
         assert data["date"] == new_date
@@ -411,7 +409,7 @@ class TestUpdateTransaction:
             "amount_oc_primary": 2500.00,
             "type": "expense"
         }
-        response = client.patch(f"/transactions/{transaction.id}", json=update_data)
+        response = client.patch(f"/users/{sample_user.id}/transactions/{transaction.id}", json=update_data)
         assert response.status_code == 200
         data = response.json()
         assert data["description"] == "Updated description"
@@ -422,20 +420,20 @@ class TestUpdateTransaction:
         """Test updating transaction with invalid type."""
         transaction = sample_transactions[0]
         update_data = {"type": "invalid_type"}
-        response = client.patch(f"/transactions/{transaction.id}", json=update_data)
+        response = client.patch(f"/users/{sample_user.id}/transactions/{transaction.id}", json=update_data)
         assert response.status_code == 422
     
     def test_update_transaction_invalid_amount(self, client, db_session, sample_user, sample_transactions):
         """Test updating transaction with invalid amount."""
         transaction = sample_transactions[0]
         update_data = {"amount_oc_primary": -1000.00}
-        response = client.patch(f"/transactions/{transaction.id}", json=update_data)
+        response = client.patch(f"/users/{sample_user.id}/transactions/{transaction.id}", json=update_data)
         assert response.status_code == 409  # Database constraint violation
     
     def test_update_transaction_not_found(self, client, db_session, sample_user):
         """Test updating a non-existent transaction."""
         update_data = {"description": "Updated description"}
-        response = client.patch("/transactions/99999", json=update_data)
+        response = client.patch(f"/users/{sample_user.id}/transactions/99999", json=update_data)
         assert response.status_code == 404
 
 class TestDeleteTransaction:
@@ -444,17 +442,17 @@ class TestDeleteTransaction:
     def test_delete_transaction_success(self, client, db_session, sample_user, sample_transactions):
         """Test successful transaction deletion."""
         transaction = sample_transactions[0]
-        response = client.delete(f"/transactions/{transaction.id}")
+        response = client.delete(f"/users/{sample_user.id}/transactions/{transaction.id}")
         assert response.status_code == 204
         
         # Verify transaction is soft deleted (not found in active list)
-        response = client.get("/transactions/")
+        response = client.get(f"/users/{sample_user.id}/transactions/")
         transaction_ids = [tx["id"] for tx in response.json()]
         assert transaction.id not in transaction_ids
     
     def test_delete_transaction_not_found(self, client, db_session, sample_user):
         """Test deleting a non-existent transaction."""
-        response = client.delete("/transactions/99999")
+        response = client.delete(f"/users/{sample_user.id}/transactions/99999")
         assert response.status_code == 404
 
 class TestTransactionValidation:
@@ -474,7 +472,7 @@ class TestTransactionValidation:
             "account_id_primary": sample_accounts["income"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         if response.status_code != 200:
             print(f"Date validation response status: {response.status_code}")
             print(f"Date validation response content: {response.text}")
@@ -493,7 +491,7 @@ class TestTransactionValidation:
             "account_id_primary": sample_accounts["income"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         # Description field doesn't have length validation in TxBase schema
         assert response.status_code == 200
     
@@ -513,7 +511,7 @@ class TestTransactionValidation:
                 "account_id_primary": sample_accounts["income"].id,
                 "account_id_secondary": sample_accounts["checking_account"].id
             }
-            response = client.post("/transactions/", json=transaction_data)
+            response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
             assert response.status_code == 200
             assert response.json()["currency_primary"] == currency
 
@@ -533,7 +531,7 @@ class TestTransactionEdgeCases:
             "account_id_primary": sample_accounts["income"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
     
     def test_transaction_minimum_amount(self, client, db_session, sample_user, sample_accounts):
@@ -549,7 +547,7 @@ class TestTransactionEdgeCases:
             "account_id_primary": sample_accounts["income"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
     
     def test_transaction_zero_amount(self, client, db_session, sample_user, sample_accounts):
@@ -564,7 +562,7 @@ class TestTransactionEdgeCases:
             "account_id_primary": sample_accounts["income"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 400  # Should not allow zero amount
     
     def test_transaction_special_characters_in_description(self, client, db_session, sample_user, sample_accounts):
@@ -579,7 +577,7 @@ class TestTransactionEdgeCases:
             "account_id_primary": sample_accounts["income"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         data = response.json()
         assert data["description"] == transaction_data["description"]
@@ -600,23 +598,23 @@ class TestTransactionIntegration:
             "account_id_primary": sample_accounts["income"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         transaction = response.json()
         transaction_id = transaction["id"]
         
         # Update transaction
         update_data = {"description": "Updated lifecycle transaction"}
-        response = client.patch(f"/transactions/{transaction_id}", json=update_data)
+        response = client.patch(f"/users/{sample_user.id}/transactions/{transaction_id}", json=update_data)
         assert response.status_code == 200
         assert response.json()["description"] == "Updated lifecycle transaction"
         
         # Delete transaction
-        response = client.delete(f"/transactions/{transaction_id}")
+        response = client.delete(f"/users/{sample_user.id}/transactions/{transaction_id}")
         assert response.status_code == 204
         
         # Verify transaction is deleted
-        response = client.get(f"/transactions/{transaction_id}")
+        response = client.get(f"/users/{sample_user.id}/transactions/{transaction_id}")
         assert response.status_code == 404
     
     def test_multiple_transaction_types(self, client, db_session, sample_user, sample_accounts):
@@ -652,11 +650,11 @@ class TestTransactionIntegration:
                 "currency_primary": "USD",
                 **tx_data
             }
-            response = client.post("/transactions/", json=full_tx_data)
+            response = client.post(f"/users/{sample_user.id}/transactions/", json=full_tx_data)
             assert response.status_code == 200
         
         # Verify all transactions exist
-        response = client.get("/transactions/")
+        response = client.get(f"/users/{sample_user.id}/transactions/")
         assert response.status_code == 200
         assert len(response.json()) == 3
 
@@ -677,7 +675,7 @@ class TestPostingRetrieval:
             "account_id_primary": sample_accounts["income"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         transaction = response.json()
         
@@ -710,7 +708,7 @@ class TestPostingRetrieval:
             "account_id_primary": sample_accounts["expense"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         transaction = response.json()
         
@@ -771,7 +769,7 @@ class TestPostingRetrieval:
                 "currency_primary": "USD",
                 **tx_data
             }
-            response = client.post("/transactions/", json=full_tx_data)
+            response = client.post(f"/users/{sample_user.id}/transactions/", json=full_tx_data)
             assert response.status_code == 200
             created_transactions.append(response.json())
         
@@ -816,7 +814,7 @@ class TestPostingRetrieval:
                 "currency_primary": "USD",
                 **tx_data
             }
-            response = client.post("/transactions/", json=full_tx_data)
+            response = client.post(f"/users/{sample_user.id}/transactions/", json=full_tx_data)
             assert response.status_code == 200
             created_transactions.append(response.json())
         
@@ -856,7 +854,7 @@ class TestTransactionSplits:
             "account_id_primary": sample_accounts["expense"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         transaction = response.json()
         
@@ -905,7 +903,7 @@ class TestTransactionSplits:
             "account_id_primary": sample_accounts["expense"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         transaction = response.json()
         
@@ -952,7 +950,7 @@ class TestTransactionSplits:
                 "account_id_primary": sample_accounts["expense"].id,
                 "account_id_secondary": sample_accounts["checking_account"].id
             }
-            response = client.post("/transactions/", json=transaction_data)
+            response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
             assert response.status_code == 200
             transactions.append(response.json())
         
@@ -985,7 +983,7 @@ class TestTransactionSplits:
             "account_id_primary": sample_accounts["expense"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         transaction = response.json()
         
@@ -1018,7 +1016,7 @@ class TestTransactionSplits:
             "account_id_primary": sample_accounts["expense"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         transaction = response.json()
         
@@ -1059,7 +1057,7 @@ class TestTransactionSplits:
             "account_id_primary": sample_accounts["expense"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         transaction = response.json()
         
@@ -1106,7 +1104,7 @@ class TestTransactionSplits:
             "account_id_primary": sample_accounts["expense"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         transaction = response.json()
         
@@ -1148,7 +1146,7 @@ class TestTransactionSplits:
             "account_id_primary": sample_accounts["expense"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         transaction = response.json()
         
@@ -1193,7 +1191,7 @@ class TestPostingLifecycleManagement:
             "account_id_primary": sample_accounts["expense"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         transaction = response.json()
         
@@ -1203,7 +1201,7 @@ class TestPostingLifecycleManagement:
         assert all(posting.active for posting in postings_list)
         
         # Deactivate the transaction
-        response = client.delete(f"/transactions/{transaction['id']}")
+        response = client.delete(f"/users/{sample_user.id}/transactions/{transaction['id']}")
         assert response.status_code == 204
         
         # Verify postings are now deactivated
@@ -1230,12 +1228,12 @@ class TestPostingLifecycleManagement:
             "account_id_primary": sample_accounts["expense"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         transaction = response.json()
         
         # Deactivate the transaction
-        response = client.delete(f"/transactions/{transaction['id']}")
+        response = client.delete(f"/users/{sample_user.id}/transactions/{transaction['id']}")
         assert response.status_code == 204
         
         # Verify postings are deactivated
@@ -1243,7 +1241,7 @@ class TestPostingLifecycleManagement:
         assert len(postings_list) == 0
         
         # Activate the transaction using the API endpoint
-        response = client.post(f"/transactions/{transaction['id']}/activate")
+        response = client.post(f"/users/{sample_user.id}/transactions/{transaction['id']}/activate")
         assert response.status_code == 200
         activated_transaction = response.json()
         assert activated_transaction["active"] == True
@@ -1266,7 +1264,7 @@ class TestPostingLifecycleManagement:
             "account_id_primary": sample_accounts["expense"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         transaction = response.json()
         
@@ -1277,7 +1275,7 @@ class TestPostingLifecycleManagement:
         
         # Update transaction amount
         update_data = {"amount_oc_primary": 200.00}
-        response = client.patch(f"/transactions/{transaction['id']}", json=update_data)
+        response = client.patch(f"/users/{sample_user.id}/transactions/{transaction['id']}", json=update_data)
         assert response.status_code == 200
         
         # Refresh the database session to get the latest data
@@ -1316,7 +1314,7 @@ class TestPostingLifecycleManagement:
             "account_id_primary": sample_accounts["expense"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         transaction = response.json()
         
@@ -1329,7 +1327,7 @@ class TestPostingLifecycleManagement:
             "type": "income",
             "account_id_primary": sample_accounts["income"].id
         }
-        response = client.patch(f"/transactions/{transaction['id']}", json=update_data)
+        response = client.patch(f"/users/{sample_user.id}/transactions/{transaction['id']}", json=update_data)
         assert response.status_code == 200
         
         # Verify new postings were created with different signs
@@ -1355,7 +1353,7 @@ class TestPostingLifecycleManagement:
             "account_id_primary": sample_accounts["expense"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         transaction = response.json()
         
@@ -1368,7 +1366,7 @@ class TestPostingLifecycleManagement:
             "account_id_primary": sample_accounts["groceries"].id,
             "account_id_secondary": sample_accounts["savings_account"].id
         }
-        response = client.patch(f"/transactions/{transaction['id']}", json=update_data)
+        response = client.patch(f"/users/{sample_user.id}/transactions/{transaction['id']}", json=update_data)
         assert response.status_code == 200
         
         # Verify new postings were created with updated accounts
@@ -1394,7 +1392,7 @@ class TestPostingLifecycleManagement:
             "account_id_primary": sample_accounts["expense"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         transaction = response.json()
         
@@ -1407,7 +1405,7 @@ class TestPostingLifecycleManagement:
             "description": "Updated description",
             "date": "2024-01-16T10:00:00"
         }
-        response = client.patch(f"/transactions/{transaction['id']}", json=update_data)
+        response = client.patch(f"/users/{sample_user.id}/transactions/{transaction['id']}", json=update_data)
         assert response.status_code == 200
         
         # Verify postings are unchanged
@@ -1460,7 +1458,7 @@ class TestPostingLifecycleManagement:
             "account_id_primary": sample_accounts["expense"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         transaction = response.json()
         
@@ -1471,7 +1469,7 @@ class TestPostingLifecycleManagement:
         
         # Update transaction amount
         update_data = {"amount_oc_primary": 250.00}
-        response = client.patch(f"/transactions/{transaction['id']}", json=update_data)
+        response = client.patch(f"/users/{sample_user.id}/transactions/{transaction['id']}", json=update_data)
         assert response.status_code == 200
         
         # Verify balance is maintained after update
@@ -1493,7 +1491,7 @@ class TestPostingLifecycleManagement:
             "account_id_primary": sample_accounts["expense"].id,
             "account_id_secondary": sample_accounts["checking_account"].id
         }
-        response = client.post("/transactions/", json=transaction_data)
+        response = client.post(f"/users/{sample_user.id}/transactions/", json=transaction_data)
         assert response.status_code == 200
         transaction = response.json()
         
@@ -1506,7 +1504,7 @@ class TestPostingLifecycleManagement:
         ]
         
         for update_data in updates:
-            response = client.patch(f"/transactions/{transaction['id']}", json=update_data)
+            response = client.patch(f"/users/{sample_user.id}/transactions/{transaction['id']}", json=update_data)
             assert response.status_code == 200
             
             # Verify balance is maintained after each update

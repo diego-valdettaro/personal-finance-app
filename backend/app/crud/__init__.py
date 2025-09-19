@@ -7,7 +7,7 @@ from . import users, people, accounts, transactions, postings, splits, fx_rates,
 
 # Re-export commonly used functions for backward compatibility
 from .users import (
-    get_users, get_user, get_user_any_status, create_user, update_user, 
+    get_users, get_user, get_user_any_status, get_user_by_email, create_user, update_user, 
     deactivate_user, activate_user
 )
 
@@ -44,7 +44,7 @@ from .reports import (
 
 __all__ = [
     # Users
-    "get_users", "get_user", "get_user_any_status", "create_user", "update_user", 
+    "get_users", "get_user", "get_user_any_status", "get_user_by_email", "create_user", "update_user", 
     "deactivate_user", "activate_user",
     
     # People

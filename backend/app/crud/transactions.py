@@ -9,7 +9,7 @@ from typing import Union
 from .. import models, schemas
 from .common import _validate_tx_header, _build_postings_from_tx_input, _validate_and_complete_postings
 
-def get_transactions(db: Session, user_id: int = None, skip: int = 0, limit: int = 50, date_from: str = None, date_to: str = None, account_id: int = None, category_id: int = None, payer_person_id: int = None) -> list[models.Transaction]:
+def get_transactions(db: Session, user_id: int = None, skip: int = 0, limit: int = 50, date_from: str = None, date_to: str = None, account_id: int = None, payer_person_id: int = None) -> list[models.Transaction]:
     """Get all active transactions for a user with pagination."""
     query = db.query(models.Transaction).filter(models.Transaction.active == True)
     if user_id is not None:
@@ -138,7 +138,7 @@ def update_transaction(db: Session, transaction_id: int, transaction: schemas.Tx
     return db_transaction
 
 def deactivate_transaction(db: Session, user_id: int, transaction_id: int) -> models.Transaction:
-    """Deactivate a transaction (soft delete) and its postings."""
+    """Deactivate a transaction (soft delete) and its postings and splits."""
     # Get transaction without filtering by active status
     db_transaction = db.query(models.Transaction).filter(
         models.Transaction.id == transaction_id,
@@ -161,11 +161,15 @@ def deactivate_transaction(db: Session, user_id: int, transaction_id: int) -> mo
     for posting in postings:
         posting.active = False
     
+    # Deactivate all associated splits
+    from .splits import deactivate_splits_for_transaction
+    deactivate_splits_for_transaction(db, transaction_id)
+    
     db.commit()
     return db_transaction
 
 def activate_transaction(db: Session, user_id: int, transaction_id: int) -> models.Transaction:
-    """Activate a transaction and its postings."""
+    """Activate a transaction and its postings and splits."""
     db_transaction = db.query(models.Transaction).filter(
         models.Transaction.id == transaction_id,
         models.Transaction.user_id == user_id
@@ -188,6 +192,10 @@ def activate_transaction(db: Session, user_id: int, transaction_id: int) -> mode
     
     for posting in postings:
         posting.active = True
+    
+    # Activate all associated splits
+    from .splits import activate_splits_for_transaction
+    activate_splits_for_transaction(db, transaction_id)
     
     db.commit()
     return db_transaction

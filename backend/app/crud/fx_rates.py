@@ -55,3 +55,49 @@ def update_fx_rate_by_key(db: Session, from_currency: str, to_currency: str, yea
         raise HTTPException(status_code=409, detail=f"Constraint violation: {e.orig}")
     db.refresh(db_fx_rate)
     return db_fx_rate
+
+def get_fx_rates(db: Session, from_currency: str = None, to_currency: str = None, year: int = None, month: int = None) -> list[models.FxRate]:
+    """Get all FX rates with optional filters."""
+    query = db.query(models.FxRate)
+    
+    if from_currency:
+        query = query.filter(models.FxRate.from_currency == from_currency)
+    if to_currency:
+        query = query.filter(models.FxRate.to_currency == to_currency)
+    if year:
+        query = query.filter(models.FxRate.year == year)
+    if month:
+        query = query.filter(models.FxRate.month == month)
+    
+    return query.all()
+
+def get_fx_rate(db: Session, fx_rate_id: int) -> models.FxRate | None:
+    """Get an FX rate by ID."""
+    return get_fx_rate_by_id(db, fx_rate_id)
+
+def update_fx_rate(db: Session, fx_rate_id: int, fx_rate: schemas.FxRateUpdate) -> models.FxRate:
+    """Update an FX rate by ID."""
+    db_fx_rate = get_fx_rate_by_id(db, fx_rate_id)
+    if not db_fx_rate:
+        raise HTTPException(status_code=404, detail="FX rate not found")
+    
+    # Update fields
+    for key, value in fx_rate.model_dump(exclude_unset=True).items():
+        setattr(db_fx_rate, key, value)
+    
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=f"Constraint violation: {e.orig}")
+    db.refresh(db_fx_rate)
+    return db_fx_rate
+
+def delete_fx_rate(db: Session, fx_rate_id: int) -> None:
+    """Delete an FX rate by ID."""
+    db_fx_rate = get_fx_rate_by_id(db, fx_rate_id)
+    if not db_fx_rate:
+        raise HTTPException(status_code=404, detail="FX rate not found")
+    
+    db.delete(db_fx_rate)
+    db.commit()

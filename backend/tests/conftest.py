@@ -42,6 +42,23 @@ def override_get_db():
 
 app.dependency_overrides[get_db] = override_get_db
 
+def override_get_authenticated_user():
+    """Override authentication for testing - return a test user."""
+    from app.models import User
+    # Create a test user that will be used for all authenticated requests
+    return User(
+        id=1,
+        name="Test User",
+        email="test@example.com",
+        home_currency="USD",
+        hashed_password="test",
+        active=True
+    )
+
+# Override authentication for testing
+from app.dependencies import get_authenticated_user
+app.dependency_overrides[get_authenticated_user] = override_get_authenticated_user
+
 @pytest.fixture(scope="function")
 def db_session():
     """Create a fresh database for each test."""
@@ -54,7 +71,7 @@ def db_session():
         Base.metadata.drop_all(bind=engine)
 
 @pytest.fixture
-def client():
+def client(db_session):
     """Create a test client for the FastAPI app."""
     return TestClient(app)
 
@@ -64,13 +81,17 @@ def sample_user_data():
     return {
         "name": "John Doe",
         "email": "john.doe@example.com",
-        "home_currency": "USD"
+        "home_currency": "USD",
+        "password": "testpassword123"
     }
 
 @pytest.fixture
 def sample_user(db_session, sample_user_data):
     """Create a sample user in the database."""
-    user = models.User(**sample_user_data)
+    from app.auth import get_password_hash
+    user_data = sample_user_data.copy()
+    user_data['hashed_password'] = get_password_hash(user_data.pop('password'))
+    user = models.User(**user_data)
     db_session.add(user)
     db_session.commit()
     db_session.refresh(user)
@@ -80,9 +101,9 @@ def sample_user(db_session, sample_user_data):
 def multiple_users(db_session):
     """Create multiple users for testing."""
     users_data = [
-        {"name": "User 1", "email": "user1@example.com", "home_currency": "USD"},
-        {"name": "User 2", "email": "user2@example.com", "home_currency": "EUR"},
-        {"name": "User 3", "email": "user3@example.com", "home_currency": "GBP"}
+        {"name": "User 1", "email": "user1@example.com", "home_currency": "USD", "hashed_password": "hashed_password_placeholder"},
+        {"name": "User 2", "email": "user2@example.com", "home_currency": "EUR", "hashed_password": "hashed_password_placeholder"},
+        {"name": "User 3", "email": "user3@example.com", "home_currency": "GBP", "hashed_password": "hashed_password_placeholder"}
     ]
     
     users = []
@@ -260,3 +281,28 @@ def sample_people(db_session, sample_user):
         people.append(person)
 
     return people
+
+@pytest.fixture
+def authenticated_headers(client, sample_user):
+    """Create authentication headers for a sample user."""
+    # Register the user
+    user_data = {
+        "name": sample_user.name,
+        "email": sample_user.email,
+        "password": "testpassword123",
+        "home_currency": sample_user.home_currency
+    }
+    
+    # Register user
+    client.post("/auth/register", json=user_data)
+    
+    # Login to get token
+    login_data = {
+        "username": sample_user.email,
+        "password": "testpassword123"
+    }
+    
+    login_response = client.post("/auth/login", data=login_data)
+    token = login_response.json()["access_token"]
+    
+    return {"Authorization": f"Bearer {token}"}

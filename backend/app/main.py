@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import accounts, transactions, people, reports, budgets, users
+from .routers import accounts, transactions, people, reports, budgets, users, auth, splits, fx_rates
 from .database import Base, engine
 
 @asynccontextmanager
@@ -21,19 +21,22 @@ app = FastAPI(
 # Configure CORS to allow requests from the frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"]
 )
 
 # Include routers
+app.include_router(auth.router)
 app.include_router(accounts.router)
 app.include_router(transactions.router)
 app.include_router(people.router)
 app.include_router(reports.router)
 app.include_router(budgets.router)
 app.include_router(users.router)
+app.include_router(splits.router)
+app.include_router(fx_rates.router)
 
 @app.get("/")
 async def root():

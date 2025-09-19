@@ -4,11 +4,8 @@ This module contains comprehensive tests for all user-related operations.
 """
 
 import pytest
-from fastapi.testclient import TestClient
-from datetime import datetime
-import json
 
-from app import models, schemas
+from app import models
 
 class TestUserCreation:
     """Test cases for user creation (POST /users/)"""
@@ -33,7 +30,8 @@ class TestUserCreation:
             user_data = {
                 "name": f"User {i}",
                 "email": f"user{i}@example.com",
-                "home_currency": currency
+                "home_currency": currency,
+                "password": "testpassword123"
             }
             response = client.post("/users/", json=user_data)
             assert response.status_code == 201
@@ -44,7 +42,8 @@ class TestUserCreation:
         user_data = {
             "name": "Test User",
             "email": "test@example.com",
-            "home_currency": "usd"
+            "home_currency": "usd",
+            "password": "testpassword123"
         }
         response = client.post("/users/", json=user_data)
         assert response.status_code == 201
@@ -78,7 +77,8 @@ class TestUserCreation:
         user_data = {
             "name": "Test User",
             "email": "invalid-email",
-            "home_currency": "USD"
+            "home_currency": "USD",
+            "password": "testpassword123"
         }
         response = client.post("/users/", json=user_data)
         assert response.status_code == 422
@@ -89,7 +89,8 @@ class TestUserCreation:
         user_data = {
             "name": "Test User",
             "email": long_email,
-            "home_currency": "USD"
+            "home_currency": "USD",
+            "password": "testpassword123"
         }
         response = client.post("/users/", json=user_data)
         assert response.status_code == 422
@@ -110,7 +111,8 @@ class TestUserCreation:
         user_data = {
             "name": "Test User",
             "email": "test@example.com",
-            "home_currency": "INVALID"
+            "home_currency": "INVALID",
+            "password": "testpassword123"
         }
         response = client.post("/users/", json=user_data)
         assert response.status_code == 422
@@ -120,7 +122,8 @@ class TestUserCreation:
         user_data = {
             "name": "Another User",
             "email": sample_user.email,  # Same email as existing user
-            "home_currency": "EUR"
+            "home_currency": "EUR",
+            "password": "testpassword123"
         }
         response = client.post("/users/", json=user_data)
         assert response.status_code == 409
@@ -171,7 +174,8 @@ class TestGetUsers:
         user2_data = {
             "name": "User 2",
             "email": "user2@example.com",
-            "home_currency": "EUR"
+            "home_currency": "EUR",
+            "password": "testpassword123"
         }
         response = client.post("/users/", json=user2_data)
         user2 = response.json()
@@ -207,7 +211,8 @@ class TestGetUsers:
         user2_data = {
             "name": "User 2",
             "email": "user2@example.com",
-            "home_currency": "EUR"
+            "home_currency": "EUR",
+            "password": "testpassword123"
         }
         response = client.post("/users/", json=user2_data)
         assert response.status_code == 201
@@ -290,7 +295,8 @@ class TestUpdateUser:
         user2_data = {
             "name": "User 2",
             "email": "user2@example.com",
-            "home_currency": "EUR"
+            "home_currency": "EUR",
+            "password": "testpassword123"
         }
         response = client.post("/users/", json=user2_data)
         user2 = response.json()
@@ -339,7 +345,8 @@ class TestUpdateUser:
         user2_data = {
             "name": "User 2",
             "email": "user2@example.com",
-            "home_currency": "EUR"
+            "home_currency": "EUR",
+            "password": "testpassword123"
         }
         response = client.post("/users/", json=user2_data)
         assert response.status_code == 201
@@ -371,7 +378,8 @@ class TestDeactivateUser:
         user2_data = {
             "name": "User 2",
             "email": "user2@example.com",
-            "home_currency": "EUR"
+            "home_currency": "EUR",
+            "password": "testpassword123"
         }
         response = client.post("/users/", json=user2_data)
         assert response.status_code == 201
@@ -400,7 +408,8 @@ class TestDeactivateUser:
         user2_data = {
             "name": "User 2",
             "email": "user2@example.com",
-            "home_currency": "EUR"
+            "home_currency": "EUR",
+            "password": "testpassword123"
         }
         response = client.post("/users/", json=user2_data)
         assert response.status_code == 201
@@ -424,7 +433,8 @@ class TestDeactivateUser:
         user2_data = {
             "name": "User 2",
             "email": "user2@example.com",
-            "home_currency": "EUR"
+            "home_currency": "EUR",
+            "password": "testpassword123"
         }
         response = client.post("/users/", json=user2_data)
         user2 = response.json()
@@ -450,7 +460,8 @@ class TestActivateUser:
         user2_data = {
             "name": "User 2",
             "email": "user2@example.com",
-            "home_currency": "EUR"
+            "home_currency": "EUR",
+            "password": "testpassword123"
         }
         response = client.post("/users/", json=user2_data)
         assert response.status_code == 201
@@ -500,7 +511,8 @@ class TestDatabaseConstraints:
         user2_data = {
             "name": "User 2",
             "email": "user2@example.com",
-            "home_currency": "EUR"
+            "home_currency": "EUR",
+            "password": "testpassword123"
         }
         response = client.post("/users/", json=user2_data)
         assert response.status_code == 201
@@ -522,7 +534,8 @@ class TestDatabaseConstraints:
         user_data = {
             "name": "Test User",
             "email": "test@example.com",
-            "home_currency": "INVALID"  # Not 3 characters
+            "home_currency": "INVALID",  # Not 3 characters
+            "password": "testpassword123"
         }
         response = client.post("/users/", json=user_data)
         assert response.status_code == 422
@@ -540,7 +553,8 @@ class TestEdgeCases:
         user_data = {
             "name": max_name,
             "email": max_email,
-            "home_currency": "USD"
+            "home_currency": "USD",
+            "password": "testpassword123"
         }
         response = client.post("/users/", json=user_data)
         assert response.status_code == 201
@@ -553,7 +567,8 @@ class TestEdgeCases:
             user_data = {
                 "name": f"User {i}",
                 "email": f"user{i}@example.com",
-                "home_currency": currency
+                "home_currency": currency,
+                "password": "testpassword123"
             }
             response = client.post("/users/", json=user_data)
             assert response.status_code == 201
@@ -564,7 +579,8 @@ class TestEdgeCases:
         user_data = {
             "name": "José María O'Connor-Smith",
             "email": "josé.maría+test@example.com",
-            "home_currency": "USD"
+            "home_currency": "USD",
+            "password": "testpassword123"
         }
         response = client.post("/users/", json=user_data)
         assert response.status_code == 201
@@ -581,7 +597,8 @@ class TestIntegration:
         user_data = {
             "name": "Lifecycle User",
             "email": "lifecycle@example.com",
-            "home_currency": "USD"
+            "home_currency": "USD",
+            "password": "testpassword123"
         }
         response = client.post("/users/", json=user_data)
         assert response.status_code == 201
@@ -592,7 +609,8 @@ class TestIntegration:
         user2_data = {
             "name": "User 2",
             "email": "user2@example.com",
-            "home_currency": "EUR"
+            "home_currency": "EUR",
+            "password": "testpassword123"
         }
         response = client.post("/users/", json=user2_data)
         assert response.status_code == 201
@@ -629,7 +647,8 @@ class TestIntegration:
             user_data = {
                 "name": f"User {i}",
                 "email": f"user{i}@example.com",
-                "home_currency": "USD"
+                "home_currency": "USD",
+                "password": "testpassword123"
             }
             response = client.post("/users/", json=user_data)
             users.append(response.json())

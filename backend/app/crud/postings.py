@@ -2,7 +2,6 @@
 Transaction postings CRUD operations.
 """
 from sqlalchemy.orm import Session
-
 from .. import models
 
 def get_postings(db: Session, transaction_id: int) -> list[models.TxPosting]:
